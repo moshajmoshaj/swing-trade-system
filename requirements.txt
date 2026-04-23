@@ -1,0 +1,9 @@
+pandas
+numpy
+requests
+python-dotenv
+matplotlib
+japanize-matplotlib
+sqlalchemy
+schedule
+vectorbt
