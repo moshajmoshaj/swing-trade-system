@@ -8,3 +8,4 @@ data/raw/*
 data/cache/
 logs/*
 !logs/candidates.csv
+!logs/final_candidates.csv
