@@ -3,6 +3,7 @@ import sys
 import time
 sys.stdout.reconfigure(encoding="utf-8")
 
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -27,7 +28,7 @@ INITIAL_CAPITAL = 1_000_000
 ATR_STOP_MULT   = 2
 ATR_TP_MULT     = 3
 MAX_HOLD_DAYS   = 10
-PRIME_CACHE     = Path("data/raw/prices_all_prime.parquet")
+PRIME_CACHE     = Path("data/raw/prices_10y.parquet")
 CANDIDATE_CSV   = Path("logs/candidates.csv")
 
 MIN_TRADES   = 5
@@ -87,6 +88,10 @@ def fetch_prime_ohlcv(data_start: str, end: str) -> dict[str, pd.DataFrame]:
     if PRIME_CACHE.exists():
         cached_df     = pd.read_parquet(PRIME_CACHE)
         cached_df["Date"] = pd.to_datetime(cached_df["Date"])
+        # prices_10y.parquet の生列を削除して列を正規化
+        _raw = [c for c in ["Code", "O", "H", "L", "C", "Vo", "Va", "UL", "LL", "AdjFactor"]
+                if c in cached_df.columns]
+        cached_df = cached_df.drop(columns=_raw)
         cached_codes4 = set(cached_df["Code4"].unique())
         print(f"  既存キャッシュ: {len(cached_codes4)}銘柄")
 
@@ -206,6 +211,16 @@ def run_backtest(df: pd.DataFrame, backtest_start: str = "") -> dict:
     }
 
 
+def _backtest_worker(args: tuple) -> tuple:
+    """ProcessPoolExecutor用ワーカー。
+    Windows spawn 方式のため module-level で定義が必須。"""
+    code4, df, bt_start_str = args
+    try:
+        return code4, run_backtest(df, backtest_start=bt_start_str)
+    except Exception:
+        return code4, None
+
+
 def save_candidate_chart(top_results: dict[str, dict], names: dict[str, str]) -> None:
     path = "logs/candidates_equity.png"
     fig, ax = plt.subplots(figsize=(14, 6))
@@ -252,22 +267,22 @@ def main() -> None:
 
     print("バックテスト実行中...")
     t0 = time.time()
+
+    # 並列処理用リストを事前構築
+    stock_list = [(c, df, bt_start_str) for c, df in price_data.items() if len(df) >= 260]
+    skipped = len(price_data) - len(stock_list)
+    print(f"  並列処理対象: {len(stock_list)} 銘柄（workers=4, chunksize=50）  スキップ: {skipped}")
+
     all_results: dict[str, dict] = {}
-    skipped = 0
-
-    for i, (code4, df) in enumerate(price_data.items(), 1):
-        if len(df) < 260:
-            skipped += 1
-            continue
-        try:
-            result = run_backtest(df, backtest_start=bt_start_str)
-            all_results[code4] = result
-        except Exception:
-            skipped += 1
-
-        if i % 300 == 0 or i == len(price_data):
-            elapsed = time.time() - t0
-            print(f"  [{i:4d}/{len(price_data)}] 完了  経過: {elapsed:.0f}秒")
+    with ProcessPoolExecutor(max_workers=4) as executor:
+        for i, (code4, result) in enumerate(
+            executor.map(_backtest_worker, stock_list, chunksize=50), 1
+        ):
+            if result is not None:
+                all_results[code4] = result
+            if i % 300 == 0 or i == len(stock_list):
+                elapsed = time.time() - t0
+                print(f"  [{i:4d}/{len(stock_list)}] 完了  経過: {elapsed:.0f}秒")
 
     elapsed_bt = time.time() - t0
     print(f"\nバックテスト完了: {len(all_results)}銘柄  所要: {elapsed_bt:.0f}秒  スキップ: {skipped}銘柄")
