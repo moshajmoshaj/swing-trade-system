@@ -115,7 +115,9 @@ def run_single_backtest(df: pd.DataFrame, bt_start: pd.Timestamp, bt_end: pd.Tim
             "final_pnl": final_pnl, "trades": trades}
 
 
-def run_is_backtest_vectorized(df_all: pd.DataFrame) -> dict:
+def run_is_backtest_vectorized(df_all: pd.DataFrame,
+                               earnings_excl: dict | None = None,
+                               adx_threshold: float = 25.0) -> dict:
     """全銘柄IS期間バックテストを完全ベクトル化で一括実行。
 
     処理フロー:
@@ -158,6 +160,24 @@ def run_is_backtest_vectorized(df_all: pd.DataFrame) -> dict:
     df["ATR14"] = tr.groupby(df["Code"]).transform(
         lambda x: x.ewm(alpha=1/14, adjust=False).mean())
 
+    # ADX14: DM+/DM- → DI+/DI- → DX → ADX（Wilder's smoothing）
+    prev_high = g["High"].shift(1)
+    prev_low  = g["Low"].shift(1)
+    dm_p_raw  = (df["High"] - prev_high).to_numpy()
+    dm_m_raw  = (prev_low  - df["Low"]).to_numpy()
+    dm_p = np.where((dm_p_raw > 0) & (dm_p_raw > dm_m_raw), dm_p_raw, 0.0)
+    dm_m = np.where((dm_m_raw > 0) & (dm_m_raw > dm_p_raw), dm_m_raw, 0.0)
+    df["_dm_p"] = dm_p
+    df["_dm_m"] = dm_m
+    sm_dp = df.groupby("Code")["_dm_p"].transform(lambda x: x.ewm(alpha=1/14, adjust=False).mean())
+    sm_dm = df.groupby("Code")["_dm_m"].transform(lambda x: x.ewm(alpha=1/14, adjust=False).mean())
+    atr_s = df["ATR14"].replace(0, np.nan)
+    di_p  = 100 * sm_dp / atr_s
+    di_m  = 100 * sm_dm / atr_s
+    dx    = 100 * (di_p - di_m).abs() / (di_p + di_m).replace(0, np.nan)
+    df["ADX14"] = dx.groupby(df["Code"]).transform(lambda x: x.ewm(alpha=1/14, adjust=False).mean())
+    df.drop(columns=["_dm_p", "_dm_m"], inplace=True)
+
     print(f"      完了: {time.time()-t0:.1f}秒")
     t1 = time.time()
 
@@ -170,7 +190,8 @@ def run_is_backtest_vectorized(df_all: pd.DataFrame) -> dict:
         (df["RSI14"] >= 45) & (df["RSI14"] <= 75) &
         (df["RSI14"] > prev_rsi) &
         (df["Volume"] >= df["VOL_MA20"] * 1.2) &
-        (df["Close"] > df["Open"])
+        (df["Close"] > df["Open"]) &
+        (df["ADX14"] > adx_threshold)               # 【改善2】ADXフィルター
     ).astype(int)
     print(f"      完了: {time.time()-t1:.1f}秒")
     t2 = time.time()
@@ -207,6 +228,22 @@ def run_is_backtest_vectorized(df_all: pd.DataFrame) -> dict:
 
     sig_pos    = sig_pos[gap_ok]
     entry_open = entry_open[gap_ok]
+
+    # 【改善3】決算除外フィルター（シグナル日または翌日が除外対象ならスキップ）
+    if earnings_excl:
+        dates_a    = df["Date"].to_numpy()
+        codes_a_e  = df["Code"].to_numpy()
+        sig_dates  = dates_a[sig_pos]
+        entry_dates = dates_a[np.clip(sig_pos + 1, 0, N - 1)]
+        keep = np.array([
+            sig_dates[i]   not in earnings_excl.get(codes_a_e[sig_pos[i]], set()) and
+            entry_dates[i] not in earnings_excl.get(codes_a_e[sig_pos[i]], set())
+            for i in range(len(sig_pos))
+        ])
+        sig_pos    = sig_pos[keep]
+        entry_open = entry_open[keep]
+        print(f"      決算除外後シグナル: {len(sig_pos):,}件")
+
     atr_v      = atr_a[sig_pos]
 
     # TP / SL
@@ -286,6 +323,59 @@ def _is_worker(args: tuple) -> tuple:
     return code5, (res if res["total"] >= MIN_TRADES else None)
 
 
+def fetch_earnings_exclusion(client: jquantsapi.ClientV2) -> dict:
+    """【改善3】J-Quants Bulk fins/summary から決算発表日±5営業日を除外セットとして取得。
+    Returns: {code5: set of pd.Timestamp}
+    """
+    import io
+    import requests as _req
+    from jquantsapi.enums import BulkEndpoint
+
+    print("  決算発表日データ取得中（Bulk fins/summary）...")
+    try:
+        bulk_list = client.get_bulk_list(endpoint=BulkEndpoint.FIN_SUMMARY)
+    except Exception as e:
+        print(f"  警告: 決算データ取得失敗 ({e}) → 除外フィルタなし")
+        return {}
+
+    dfs = []
+    for _, row in bulk_list.iterrows():
+        try:
+            url  = client.get_bulk(key=row["Key"])
+            resp = _req.get(url, timeout=60)
+            df   = pd.read_csv(io.BytesIO(resp.content), compression="gzip",
+                               low_memory=False, usecols=["DiscDate", "Code"])
+            dfs.append(df)
+        except Exception:
+            continue
+
+    if not dfs:
+        print("  警告: 決算データが空 → 除外フィルタなし")
+        return {}
+
+    earn = pd.concat(dfs, ignore_index=True)
+    earn["DiscDate"] = pd.to_datetime(earn["DiscDate"], errors="coerce")
+    earn = earn[earn["DiscDate"].notna()].copy()
+    earn["Code"] = earn["Code"].astype(str).str.strip()
+    print(f"  決算発表日: {len(earn):,}件  コード数: {earn['Code'].nunique():,}")
+
+    # 発表日±5営業日を除外セットに追加（約3取引日に相当）
+    exclusion: dict[str, set] = {}
+    for code, disc_date in zip(earn["Code"], earn["DiscDate"]):
+        offsets = pd.bdate_range(disc_date - pd.Timedelta(days=7),
+                                  disc_date + pd.Timedelta(days=7))
+        # 実際に±3営業日以内に絞る
+        nearby = [d for d in offsets
+                  if abs((pd.Timestamp(d) - disc_date).days) <= 5]
+        if code not in exclusion:
+            exclusion[code] = set()
+        for d in nearby:
+            exclusion[code].add(pd.Timestamp(d))
+
+    print(f"  除外セット作成完了: {len(exclusion):,}銘柄分")
+    return exclusion
+
+
 @dataclass
 class Position:
     code:        str
@@ -312,19 +402,34 @@ class Trade:
     reason:      str
 
 
-def run_portfolio_backtest(stock_data: dict, names: dict) -> tuple:
+def run_portfolio_backtest(stock_data: dict, names: dict,
+                           earnings_excl: dict | None = None,
+                           adx_threshold: float = 25.0,
+                           atr_tp_mult: float = ATR_TP_MULT) -> tuple:
     all_dates = sorted({d for df in stock_data.values()
                         for d in df["Date"] if OOS_START <= d <= OOS_END})
-    # 【修正3】set_index+to_dict：iterrowsより10〜50倍高速
     lookup = {code: df.set_index("Date").to_dict("index")
               for code, df in stock_data.items()}
 
-    capital   = float(INITIAL_CAPITAL)
-    positions = []
-    trades    = []
-    equity    = {OOS_START: capital}
+    capital          = float(INITIAL_CAPITAL)
+    positions: list  = []
+    trades:    list  = []
+    equity           = {OOS_START: capital}
+
+    # 【改善1】月次損失10%ストップ用トラッキング
+    cur_month        = None
+    month_start_cap  = capital
+    monthly_stopped  = False
+    monthly_stop_cnt = 0
 
     for today in all_dates:
+        # 月次リセット
+        ym = (today.year, today.month)
+        if ym != cur_month:
+            cur_month       = ym
+            month_start_cap = capital
+            monthly_stopped = False
+
         # 決済判定
         next_pos = []
         for pos in positions:
@@ -350,9 +455,16 @@ def run_portfolio_backtest(stock_data: dict, names: dict) -> tuple:
                 next_pos.append(pos)
         positions = next_pos
 
+        # 月次損失チェック（決済後に計算）
+        if not monthly_stopped and month_start_cap > 0:
+            loss_pct = (capital - month_start_cap) / month_start_cap * 100
+            if loss_pct <= -10.0:
+                monthly_stopped = True
+                monthly_stop_cnt += 1
+
         # エントリー判定
         slots = MAX_POSITIONS - len(positions)
-        if slots > 0:
+        if slots > 0 and not monthly_stopped:   # 【改善1】月次ストップ中はエントリー禁止
             holding = {p.code for p in positions}
             signals = []
             for code, df in stock_data.items():
@@ -366,6 +478,9 @@ def run_portfolio_backtest(stock_data: dict, names: dict) -> tuple:
                     continue
                 if pd.isna(prev_row.get("ATR14")):
                     continue
+                # 【改善2】ADXフィルター
+                if prev_row.get("ADX14", 0) <= adx_threshold:
+                    continue
                 today_row = lookup[code].get(today)
                 if today_row is None:
                     continue
@@ -373,6 +488,11 @@ def run_portfolio_backtest(stock_data: dict, names: dict) -> tuple:
                 gap = (ep - prev_row["Close"]) / prev_row["Close"]
                 if gap < -0.015:
                     continue
+                # 【改善3】決算除外フィルター
+                if earnings_excl:
+                    excl_set = earnings_excl.get(code, set())
+                    if today in excl_set:
+                        continue
                 signals.append((float(prev_row["RSI14"]), code, prev_row, ep))
 
             signals.sort(key=lambda x: x[0], reverse=True)
@@ -380,13 +500,14 @@ def run_portfolio_backtest(stock_data: dict, names: dict) -> tuple:
                 atr = float(prev_row["ATR14"])
                 sh, sl = calc_position_size(capital, atr, ep)
                 sh = min(sh, int(capital * MAX_POS_RATIO / ep))
-                tp = ep + atr * ATR_TP_MULT
+                tp = ep + atr * atr_tp_mult
                 if sh > 0 and ep * sh <= capital:
                     positions.append(Position(code, names.get(code, code),
                                               today, ep, sh, sl, tp, signal_rsi=rsi))
         equity[today] = capital
 
     equity_s = pd.Series(equity).sort_index()
+    print(f"  月次ストップ発動: {monthly_stop_cnt}回")
     return trades, equity_s
 
 
@@ -429,6 +550,9 @@ def main() -> None:
     name_map    = dict(zip(master["Code"], master["CoName"]))
     sector_map  = dict(zip(master["Code"], master["S33Nm"]))
 
+    # ── 【改善3】決算除外日セット取得 ──────────────────────
+    earnings_excl = fetch_earnings_exclusion(client)
+
     # ── IS期間 銘柄別バックテスト（完全ベクトル化） ───────────
     print(f"\n【STEP1】IS期間バックテスト実行中: {IS_BT_START.date()} ～ {IS_BT_END.date()}")
     t0 = time.time()
@@ -438,7 +562,7 @@ def main() -> None:
                  if c in df_all.columns]
     df_clean = df_all.drop(columns=drop_cols).sort_values(["Code", "Date"]).reset_index(drop=True)
 
-    is_results = run_is_backtest_vectorized(df_clean)
+    is_results = run_is_backtest_vectorized(df_clean, earnings_excl=earnings_excl)
     print(f"  IS完了: {len(is_results)} 銘柄が取引あり  総経過: {time.time()-t0:.1f}秒")
 
     # ── 銘柄フィルタリング ──────────────────────────────────
@@ -484,6 +608,21 @@ def main() -> None:
             continue
         df_s = add_indicators(df_s)
         df_s = generate_signals(df_s)
+        # 【改善2】OOS用 ADX14 追加
+        g_s       = df_s.groupby(df_s.index // len(df_s))  # dummy; use Series ops directly
+        prev_hi   = df_s["High"].shift(1)
+        prev_lo   = df_s["Low"].shift(1)
+        dm_p_r    = (df_s["High"] - prev_hi).to_numpy()
+        dm_m_r    = (prev_lo - df_s["Low"]).to_numpy()
+        dm_p_v    = np.where((dm_p_r > 0) & (dm_p_r > dm_m_r), dm_p_r, 0.0)
+        dm_m_v    = np.where((dm_m_r > 0) & (dm_m_r > dm_p_r), dm_m_r, 0.0)
+        atr_safe  = df_s["ATR14"].replace(0, np.nan)
+        sm_dp_s   = pd.Series(dm_p_v, index=df_s.index).ewm(alpha=1/14, adjust=False).mean()
+        sm_dm_s   = pd.Series(dm_m_v, index=df_s.index).ewm(alpha=1/14, adjust=False).mean()
+        di_p_s    = 100 * sm_dp_s / atr_safe
+        di_m_s    = 100 * sm_dm_s / atr_safe
+        dx_s      = 100 * (di_p_s - di_m_s).abs() / (di_p_s + di_m_s).replace(0, np.nan)
+        df_s["ADX14"] = dx_s.ewm(alpha=1/14, adjust=False).mean()
         stock_data_oos[code5] = df_s
     print(f"  OOS対象: {len(stock_data_oos)} 銘柄")
 
@@ -491,7 +630,8 @@ def main() -> None:
 
     # ── OOSポートフォリオバックテスト ──────────────────────
     print(f"\n【STEP4】OOSポートフォリオバックテスト実行中...")
-    trades, equity = run_portfolio_backtest(stock_data_oos, names_oos)
+    trades, equity = run_portfolio_backtest(stock_data_oos, names_oos,
+                                            earnings_excl=earnings_excl)
     stats = compute_stats(trades, equity)
 
     # ── 結果表示 ────────────────────────────────────────────
