@@ -1,5 +1,5 @@
 # 自動売買システム設計書
-**最終更新：2026年4月26日　Version 2.1**
+**最終更新：2026年4月26日　Version 2.2**
 
 ---
 
@@ -247,7 +247,7 @@ swing-trade-system/
 | Phase 1 | データ取得・バックテスト基盤・全銘柄スキャン | ✅ 完了 |
 | Phase 2 | 候補銘柄絞り込み（708→30銘柄） | ✅ 完了 |
 | Phase 3 | 10年データ取得・OOSバックテスト・戦略確定 | ✅ 完了 |
-| Phase 4 | ペーパートレード（3ヶ月） | 🔄 開始準備中 |
+| Phase 4 | ペーパートレード（3ヶ月） | 🔄 実行中（2026-04-27開始） |
 | Phase 5 | 少額実運用（50万以下） | ❌ 未着手 |
 | Phase 6 | 実運用フル稼働・自動化 | ❌ 未着手 |
 
@@ -269,8 +269,14 @@ swing-trade-system/
 - 模擬年利8%以上
 
 ### 作成が必要なスクリプト
-- `src/scanner.py`：毎日のシグナルスキャン・候補銘柄表示
-- `logs/paper_trade_log.xlsx`：模擬取引記録
+- `src/scanner.py`：毎日のシグナルスキャン・候補銘柄表示 ✅完了
+- `src/check_bizday.py`：土日・祝日判定 ✅完了
+- `src/get_ts.py`：タイムスタンプ取得ヘルパー ✅完了
+- `run_scanner.bat`：タスクスケジューラ用バッチファイル ✅完了
+- `logs/paper_trade_log.xlsx`：模擬取引記録 ✅完了
+- `logs/scanner_log.csv`：スキャン履歴ログ ✅完了
+- `logs/scheduler_log.txt`：スケジューラ実行ログ ✅完了
+- タスクスケジューラ登録済み（毎日15:30自動実行・土日祝スキップ） ✅完了
 
 ---
 
@@ -285,6 +291,8 @@ swing-trade-system/
 | fe93b96 | fix: parquetファイルをGit管理から除外 |
 | cfd41a9 | perf: ベクトル化で103倍高速化 |
 | 4203f1f | Phase3完了: 戦略A+B検証・ベスト設定確定(年利8.56%・DD-8.49%) |
+| 78b886c | docs: 目標・資金計画・人生設計前提を現実的に見直し(Version 2.1) |
+| 最新 | Phase4完了: scanner・バッチ・タスクスケジューラ設定完了 |
 
 ---
 
@@ -303,4 +311,4 @@ swing-trade-system/
 ---
 
 *本ドキュメントはフェーズ完了時・重要な変更時に更新する*
-*Last Updated: 2026年4月26日　Version 2.1*
+*Last Updated: 2026年4月26日　Version 2.2*

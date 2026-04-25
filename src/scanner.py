@@ -1,0 +1,323 @@
+"""
+src/scanner.py
+Phase 4 ペーパートレード用シグナルスキャナー
+毎営業日 15:30 に手動実行する
+
+実行方法:
+    python src/scanner.py
+
+出力:
+    - コンソール: シグナル銘柄一覧
+    - logs/scanner_log.csv: 実行履歴
+"""
+
+import sys
+import os
+sys.stdout.reconfigure(encoding="utf-8")
+
+import pandas as pd
+import pandas_ta as ta
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+import jquantsapi
+
+load_dotenv()
+
+# ──────────────────────────────────────────
+# 設定
+# ──────────────────────────────────────────
+CANDIDATES_CSV   = "logs/final_candidates.csv"   # 対象30銘柄
+SCANNER_LOG_CSV  = "logs/scanner_log.csv"         # スキャン履歴
+DAYS_TO_FETCH    = 250                            # 指標計算に必要な日数（SMA200対応）
+
+# 戦略Aパラメータ（設計書準拠）
+SMA_SHORT        = 20
+SMA_LONG         = 50
+SMA_TREND        = 200
+RSI_PERIOD       = 14
+RSI_MIN          = 45
+RSI_MAX          = 75
+RSI_LOOKBACK     = 3       # RSI上昇確認日数
+ATR_PERIOD       = 14
+ADX_PERIOD       = 14
+ADX_MIN          = 15
+VOL_MA_PERIOD    = 20
+VOL_SURGE_RATIO  = 1.2
+GAP_DOWN_THRESH  = -0.015  # -1.5%
+EARNINGS_WINDOW  = 3       # 決算前後営業日
+
+
+# ──────────────────────────────────────────
+# J-Quants クライアント取得
+# ──────────────────────────────────────────
+def get_client() -> jquantsapi.ClientV2:
+    token = os.getenv("JQUANTS_REFRESH_TOKEN")
+    if not token:
+        print("エラー: .env に JQUANTS_REFRESH_TOKEN が設定されていません")
+        sys.exit(1)
+    return jquantsapi.ClientV2(api_key=token)
+
+
+# ──────────────────────────────────────────
+# 対象銘柄コード読み込み
+# ──────────────────────────────────────────
+def load_candidates() -> list[str]:
+    if not os.path.exists(CANDIDATES_CSV):
+        print(f"エラー: {CANDIDATES_CSV} が見つかりません")
+        sys.exit(1)
+    df = pd.read_csv(CANDIDATES_CSV, dtype=str)
+    # Code列を探す（列名が異なる場合も対応）
+    col = next((c for c in df.columns if "code" in c.lower()), df.columns[0])
+    codes = df[col].str.zfill(4).tolist()
+    print(f"対象銘柄数: {len(codes)} 銘柄")
+    return codes
+
+
+# ──────────────────────────────────────────
+# 株価データ取得
+# ──────────────────────────────────────────
+def fetch_prices(client: jquantsapi.ClientV2, codes: list[str]) -> pd.DataFrame:
+    end_date   = datetime.today()
+    start_date = end_date - timedelta(days=DAYS_TO_FETCH * 1.5)  # 営業日換算バッファ
+
+    print(f"株価データ取得中... ({start_date.strftime('%Y-%m-%d')} ～ {end_date.strftime('%Y-%m-%d')})")
+
+    col_rename = {"O": "Open", "H": "High", "L": "Low", "C": "Close", "Vo": "Volume"}
+
+    dfs = []
+    for code in codes:
+        try:
+            df = client.get_eq_bars_daily(
+                code=code,
+                from_yyyymmdd=start_date.strftime("%Y%m%d"),
+                to_yyyymmdd=end_date.strftime("%Y%m%d"),
+            )
+            if df is not None and not df.empty:
+                df = df.rename(columns=col_rename)
+                df["Code"] = code  # 4桁コードで統一（APIは5桁を返すため上書き）
+                dfs.append(df)
+        except Exception as e:
+            print(f"  警告: {code} の取得失敗 ({e})")
+
+    if not dfs:
+        print("エラー: 株価データを取得できませんでした")
+        sys.exit(1)
+
+    all_df = pd.concat(dfs, ignore_index=True)
+    all_df["Date"] = pd.to_datetime(all_df["Date"])
+    all_df = all_df.sort_values(["Code", "Date"]).reset_index(drop=True)
+    print(f"取得完了: {len(all_df)} 件")
+    return all_df
+
+
+# ──────────────────────────────────────────
+# テクニカル指標計算
+# ──────────────────────────────────────────
+def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["SMA20"]    = ta.sma(df["Close"], length=SMA_SHORT)
+    df["SMA50"]    = ta.sma(df["Close"], length=SMA_LONG)
+    df["SMA200"]   = ta.sma(df["Close"], length=SMA_TREND)
+    df["RSI14"]    = ta.rsi(df["Close"], length=RSI_PERIOD)
+    df["ATR14"]    = ta.atr(df["High"], df["Low"], df["Close"], length=ATR_PERIOD)
+    df["VOL_MA20"] = ta.sma(df["Volume"], length=VOL_MA_PERIOD)
+
+    # ADX
+    adx_df = ta.adx(df["High"], df["Low"], df["Close"], length=ADX_PERIOD)
+    if adx_df is not None and f"ADX_{ADX_PERIOD}" in adx_df.columns:
+        df["ADX14"] = adx_df[f"ADX_{ADX_PERIOD}"]
+    else:
+        df["ADX14"] = None
+
+    # 前日終値（ギャップダウン計算用）
+    df["PrevClose"] = df["Close"].shift(1)
+    return df
+
+
+# ──────────────────────────────────────────
+# 決算日データ取得（簡易版：APIから取得）
+# ──────────────────────────────────────────
+def fetch_earnings_dates(client: jquantsapi.ClientV2, codes: list[str]) -> dict[str, list]:
+    """決算発表日を取得してコードごとに返す"""
+    earnings = {}
+    try:
+        df = client.get_eq_earnings_cal()  # 決算発表予定日カレンダー
+        if df is not None and not df.empty:
+            date_col = next((c for c in df.columns if "date" in c.lower()), None)
+            code_col = next((c for c in df.columns if "code" in c.lower()), None)
+            if date_col and code_col:
+                df[date_col] = pd.to_datetime(df[date_col])
+                for code in codes:
+                    dates = df[df[code_col] == code][date_col].tolist()
+                    earnings[code] = dates
+    except Exception as e:
+        print(f"  警告: 決算日データ取得失敗 ({e}) → 決算除外フィルターをスキップ")
+    return earnings
+
+
+# ──────────────────────────────────────────
+# 戦略Aシグナル判定（設計書全9条件）
+# ──────────────────────────────────────────
+def check_signal(row: pd.Series, today: pd.Timestamp, earnings_dates: list) -> tuple[bool, list[str]]:
+    """
+    Returns:
+        (signal: bool, failed_conditions: list[str])
+    """
+    failed = []
+
+    # 条件1: SMA20 > SMA50（上昇トレンド）
+    if not (pd.notna(row["SMA20"]) and pd.notna(row["SMA50"]) and row["SMA20"] > row["SMA50"]):
+        failed.append("SMA20>SMA50")
+
+    # 条件2: RSI 45〜75
+    if not (pd.notna(row["RSI14"]) and RSI_MIN <= row["RSI14"] <= RSI_MAX):
+        failed.append(f"RSI({row['RSI14']:.1f})" if pd.notna(row["RSI14"]) else "RSI(NaN)")
+
+    # 条件3: 出来高フィルター（20日平均の1.2倍以上）
+    if not (pd.notna(row["VOL_MA20"]) and row["Volume"] >= row["VOL_MA20"] * VOL_SURGE_RATIO):
+        failed.append("出来高")
+
+    # 条件4: 終値 > SMA200（長期トレンド）
+    if not (pd.notna(row["SMA200"]) and row["Close"] > row["SMA200"]):
+        failed.append("SMA200")
+
+    # 条件5: RSI14が3日前より上昇中（モメンタム）
+    if not (pd.notna(row.get("RSI14_lag3")) and row["RSI14"] > row["RSI14_lag3"]):
+        failed.append("RSI上昇")
+
+    # 条件6: ギャップダウン除外（前日比-1.5%以上の窓開け下落を除外）
+    if pd.notna(row["PrevClose"]) and row["PrevClose"] > 0:
+        gap = (row["Open"] - row["PrevClose"]) / row["PrevClose"]
+        if gap <= GAP_DOWN_THRESH:
+            failed.append(f"ギャップダウン({gap*100:.1f}%)")
+
+    # 条件7: 陽線（終値 > 始値）
+    if not (row["Close"] > row["Open"]):
+        failed.append("陰線")
+
+    # 条件8: ADX > 15
+    if not (pd.notna(row.get("ADX14")) and row["ADX14"] > ADX_MIN):
+        failed.append(f"ADX({row['ADX14']:.1f})" if pd.notna(row.get("ADX14")) else "ADX(NaN)")
+
+    # 条件9: 決算除外（前後3営業日）
+    if earnings_dates:
+        for edate in earnings_dates:
+            delta = abs((today - edate).days)
+            if delta <= EARNINGS_WINDOW * 1.5:  # 営業日換算バッファ
+                failed.append(f"決算近接({edate.strftime('%m/%d')})")
+                break
+
+    return len(failed) == 0, failed
+
+
+# ──────────────────────────────────────────
+# スキャン実行
+# ──────────────────────────────────────────
+def run_scan(all_df: pd.DataFrame, codes: list[str], earnings_map: dict) -> pd.DataFrame:
+    today = all_df["Date"].max()
+    print(f"\nスキャン基準日: {today.strftime('%Y-%m-%d (%a)')}")
+    print("=" * 60)
+
+    results = []
+
+    for code in codes:
+        df = all_df[all_df["Code"] == code].copy().reset_index(drop=True)
+        if len(df) < SMA_TREND + 10:
+            continue
+
+        df = add_indicators(df)
+        df["RSI14_lag3"] = df["RSI14"].shift(RSI_LOOKBACK)
+
+        # 最新行で判定
+        latest = df.iloc[-1]
+        if latest["Date"] != today:
+            continue  # 当日データがない銘柄はスキップ
+
+        earnings_dates = earnings_map.get(code, [])
+        signal, failed = check_signal(latest, today, earnings_dates)
+
+        entry_price  = latest["Close"]
+        atr          = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
+        stop_loss    = round(entry_price - atr * 2, 1) if atr else None
+        take_profit  = round(entry_price + atr * 4, 1) if atr else None
+        rsi          = round(latest["RSI14"], 1) if pd.notna(latest["RSI14"]) else None
+        adx          = round(latest["ADX14"], 1) if pd.notna(latest.get("ADX14")) else None
+
+        results.append({
+            "Code"        : code,
+            "Date"        : today.strftime("%Y-%m-%d"),
+            "Signal"      : signal,
+            "Close"       : entry_price,
+            "RSI14"       : rsi,
+            "ADX14"       : adx,
+            "StopLoss"    : stop_loss,
+            "TakeProfit"  : take_profit,
+            "ATR14"       : round(atr, 1) if atr else None,
+            "FailedConds" : ", ".join(failed) if not signal else "",
+        })
+
+    cols = ["Code", "Date", "Signal", "Close", "RSI14", "ADX14", "StopLoss", "TakeProfit", "ATR14", "FailedConds"]
+    if not results:
+        print("  (スキャン対象銘柄なし: データ不足または当日データなし)")
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame(results, columns=cols)
+
+
+# ──────────────────────────────────────────
+# 結果表示・ログ保存
+# ──────────────────────────────────────────
+def display_and_save(result_df: pd.DataFrame) -> None:
+    signals = result_df[result_df["Signal"] == True].sort_values("RSI14", ascending=False)
+    no_signals = result_df[result_df["Signal"] == False]
+
+    print(f"\n【シグナル銘柄】{len(signals)} 件")
+    print("-" * 60)
+
+    if signals.empty:
+        print("  本日のシグナルなし")
+    else:
+        print(f"  {'コード':<8} {'終値':>7} {'RSI':>6} {'ADX':>6} {'損切り':>8} {'利確':>8}")
+        print(f"  {'-'*8} {'-'*7} {'-'*6} {'-'*6} {'-'*8} {'-'*8}")
+        for _, row in signals.iterrows():
+            print(f"  {row['Code']:<8} {row['Close']:>7,.0f} {row['RSI14']:>6.1f} "
+                  f"{row['ADX14']:>6.1f} {row['StopLoss']:>8,.0f} {row['TakeProfit']:>8,.0f}")
+
+    print(f"\n【非シグナル銘柄】{len(no_signals)} 件（条件未達）")
+
+    # ログ保存
+    os.makedirs("logs", exist_ok=True)
+    if os.path.exists(SCANNER_LOG_CSV):
+        existing = pd.read_csv(SCANNER_LOG_CSV, dtype=str)
+        combined = pd.concat([existing, result_df.astype(str)], ignore_index=True)
+    else:
+        combined = result_df.astype(str)
+
+    combined.to_csv(SCANNER_LOG_CSV, index=False, encoding="utf-8-sig")
+    print(f"\nログ保存: {SCANNER_LOG_CSV}")
+
+
+# ──────────────────────────────────────────
+# メイン
+# ──────────────────────────────────────────
+def main():
+    print("=" * 60)
+    print("  戦略A スイングトレード シグナルスキャナー")
+    print(f"  実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
+
+    client  = get_client()
+    codes   = load_candidates()
+    all_df  = fetch_prices(client, codes)
+
+    # 決算日取得（失敗してもスキャンは続行）
+    print("決算日データ取得中...")
+    earnings_map = fetch_earnings_dates(client, codes)
+
+    result_df = run_scan(all_df, codes, earnings_map)
+    display_and_save(result_df)
+
+    print("\n完了。シグナル銘柄をpaper_trade_log.xlsxに記録してください。")
+
+
+if __name__ == "__main__":
+    main()
