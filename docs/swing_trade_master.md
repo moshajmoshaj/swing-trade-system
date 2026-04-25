@@ -1,5 +1,5 @@
 # 自動売買システム設計書
-**最終更新：2026年4月26日　Version 2.2**
+**最終更新：2026年4月26日　Version 2.3**
 
 ---
 
@@ -276,7 +276,20 @@ swing-trade-system/
 - `logs/paper_trade_log.xlsx`：模擬取引記録 ✅完了
 - `logs/scanner_log.csv`：スキャン履歴ログ ✅完了
 - `logs/scheduler_log.txt`：スケジューラ実行ログ ✅完了
-- タスクスケジューラ登録済み（毎日15:30自動実行・土日祝スキップ） ✅完了
+- `src/auto_entry.py`：シグナル銘柄の自動エントリー記録 ✅完了
+- `src/auto_exit.py`：決済条件自動判定・損益記録 ✅完了
+- `src/auto_report.py`：月次集計自動更新 ✅完了
+- タスクスケジューラ登録済み（毎日17:00自動実行・土日祝スキップ） ✅完了
+- タスクスケジューラ実行時刻：17:00（J-Quantsデータ配信完了後） ✅完了
+
+### 毎営業日17:00 自動実行フロー
+
+| 順序 | スクリプト | 処理内容 |
+|------|-----------|---------|
+| ① | `auto_exit.py` | 保有銘柄の損切り/利確/強制終了・損益記録 |
+| ② | `scanner.py` | 当日シグナル30銘柄スキャン |
+| ③ | `auto_entry.py` | RSI降順・空き枠にエントリー記録 |
+| ④ | `auto_report.py` | 月次集計シート自動更新 |
 
 ---
 
@@ -292,7 +305,8 @@ swing-trade-system/
 | cfd41a9 | perf: ベクトル化で103倍高速化 |
 | 4203f1f | Phase3完了: 戦略A+B検証・ベスト設定確定(年利8.56%・DD-8.49%) |
 | 78b886c | docs: 目標・資金計画・人生設計前提を現実的に見直し(Version 2.1) |
-| 最新 | Phase4完了: scanner・バッチ・タスクスケジューラ設定完了 |
+| b9ced27 | Phase4開始: scanner・バッチ・タスクスケジューラ設定完了(Version 2.2) |
+| cd27f1b | Phase4完全自動化: auto_entry/exit/report追加・17:00実行設定 |
 
 ---
 
@@ -311,4 +325,4 @@ swing-trade-system/
 ---
 
 *本ドキュメントはフェーズ完了時・重要な変更時に更新する*
-*Last Updated: 2026年4月26日　Version 2.2*
+*Last Updated: 2026年4月26日　Version 2.3*
