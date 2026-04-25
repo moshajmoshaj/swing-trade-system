@@ -3,9 +3,7 @@
 .venv/
 __pycache__/
 *.pyc
-data/raw/*
-!data/raw/prices_all_prime.parquet
-!data/raw/prices_10y.parquet
+data/raw/*.parquet
 data/cache/
 logs/*
 !logs/candidates.csv
