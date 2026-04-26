@@ -1,5 +1,5 @@
 # 自動売買システム設計書
-**最終更新：2026年4月26日　Version 2.4**
+**最終更新：2026年4月26日　Version 2.5**
 
 ---
 
@@ -96,6 +96,7 @@
 | AI | Claude Pro + Claude Code（VSCode経由） |
 | バージョン管理 | Git / GitHub |
 | Claude Code設定 | --dangerously-skip-permissions |
+| 通知 | ntfy（スマホプッシュ通知） |
 
 ### J-Quants Standardプラン仕様
 - データ格納期間：過去10年分（実際は2016-04-01〜）
@@ -124,6 +125,13 @@ swing-trade-system/
 │   ├── strategy_b.py            ✅ 戦略Bシグナル生成（不採用・保存のみ）
 │   ├── backtest.py              ✅ 単銘柄バックテスト（ベクトル化済み）
 │   ├── portfolio_backtest.py    ✅ ポートフォリオバックテスト
+│   ├── scanner.py               ✅ 毎日のシグナルスキャン
+│   ├── auto_entry.py            ✅ シグナル銘柄の自動エントリー記録
+│   ├── auto_exit.py             ✅ 決済条件自動判定・損益記録
+│   ├── auto_report.py           ✅ 月次集計自動更新
+│   ├── notifier.py              ✅ ntfyスマホ通知
+│   ├── check_bizday.py          ✅ 土日・祝日判定
+│   ├── get_ts.py                ✅ タイムスタンプ取得ヘルパー
 │   └── utils/
 │       └── risk.py              ✅ ポジションサイズ・損切り計算
 ├── data/
@@ -261,6 +269,7 @@ swing-trade-system/
 ### 自動化構成（2026-04-26完成）
 - 実行方式：Windowsタスクスケジューラ（毎営業日17:00自動実行）
 - 土日・祝日：`check_bizday.py` で自動スキップ
+- スマホ通知：ntfy（トピック：swing-trade-moshaj-2026）
 - 実行フロー：
   ① `auto_exit.py`：保有銘柄の決済判定・損益記録
   ② `scanner.py`：30銘柄シグナルスキャン
@@ -330,4 +339,4 @@ swing-trade-system/
 ---
 
 *本ドキュメントはフェーズ完了時・重要な変更時に更新する*
-*Last Updated: 2026年4月26日　Version 2.4*
+*Last Updated: 2026年4月26日　Version 2.5*
