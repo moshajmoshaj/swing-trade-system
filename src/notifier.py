@@ -1,37 +1,40 @@
 """
 src/notifier.py
-LINE Notify 送信ユーティリティ
-LINE_NOTIFY_TOKEN が未設定の場合はサイレントスキップ。
+Gmail 通知ユーティリティ（smtplib 標準ライブラリ）
+GMAIL_ADDRESS・GMAIL_APP_PASSWORD が未設定の場合はサイレントスキップ。
 """
 import os
-import requests
+import smtplib
+from email.mime.text import MIMEText
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_URL = "https://notify-api.line.me/api/notify"
-_LIMIT = 140
+_SMTP_HOST = "smtp.gmail.com"
+_SMTP_PORT = 587
 
 
-def send_line(message: str) -> bool:
+def send_mail(subject: str, body: str) -> bool:
     """
-    LINE Notify にメッセージを送信する。
+    Gmail でメールを自分宛に送信する。
     Returns: True=送信成功, False=スキップまたは失敗
     """
-    token = os.getenv("LINE_NOTIFY_TOKEN", "").strip()
-    if not token:
+    address  = os.getenv("GMAIL_ADDRESS", "").strip()
+    password = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+    if not address or not password:
         return False
 
-    if len(message) > _LIMIT:
-        message = message[:_LIMIT - 1] + "…"
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"]    = address
+    msg["To"]      = address
 
     try:
-        resp = requests.post(
-            _URL,
-            headers={"Authorization": f"Bearer {token}"},
-            data={"message": message},
-            timeout=10,
-        )
-        return resp.status_code == 200
+        with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(address, password)
+            smtp.sendmail(address, [address], msg.as_string())
+        return True
     except Exception:
         return False

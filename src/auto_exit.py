@@ -15,7 +15,7 @@ import jpholiday
 import jquantsapi
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))
-from notifier import send_line
+from notifier import send_mail
 
 load_dotenv()
 
@@ -229,13 +229,13 @@ def main() -> None:
     wb.save(TRADE_LOG)
     log(f"INFO: {exited} 件決済記録 → {TRADE_LOG}")
 
-    # LINE 通知（決済結果サマリー）
+    # Gmail 通知（決済結果サマリー）
     remaining = len(holdings) - exited
-    lines = [f"【ST】決済判定完了\n決済：{exited}件"]
+    body_lines = [f"決済：{exited}件"]
     for code, pnl, reason in exits_info:
-        lines.append(f"　{code} {pnl:+,.0f}円（{reason}）")
-    lines.append(f"保有中：{remaining}銘柄")
-    send_line("\n".join(lines))
+        body_lines.append(f"　{code} {pnl:+,.0f}円（{reason}）")
+    body_lines.append(f"保有中：{remaining}銘柄")
+    send_mail("【ST】決済判定完了", "\n".join(body_lines))
 
     # 月次損失チェック（決済記録後に再集計）
     wb2      = load_workbook(TRADE_LOG)

@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from openpyxl import load_workbook
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))
-from notifier import send_line
+from notifier import send_mail
 
 load_dotenv()
 
@@ -164,14 +164,14 @@ def main() -> None:
     wb.save(TRADE_LOG)
     log(f"INFO: {entered} 件エントリー記録 → {TRADE_LOG}")
 
-    # LINE 通知（エントリー結果サマリー）
+    # Gmail 通知（エントリー結果サマリー）
     total_held = len(holdings) + entered
-    lines = [f"【ST】エントリー記録完了\n新規：{entered}件"]
+    body_lines = [f"新規：{entered}件"]
     for code, rsi in entries_info:
         rsi_str = f"{rsi:.1f}" if rsi is not None else "N/A"
-        lines.append(f"　{code} RSI {rsi_str}")
-    lines.append(f"保有中：{total_held}銘柄")
-    send_line("\n".join(lines))
+        body_lines.append(f"　{code} RSI {rsi_str}")
+    body_lines.append(f"保有中：{total_held}銘柄")
+    send_mail("【ST】エントリー記録完了", "\n".join(body_lines))
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ import pandas as pd
 from openpyxl import load_workbook
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))
-from notifier import send_line
+from notifier import send_mail
 
 TRADE_LOG = "logs/paper_trade_log.xlsx"
 SCHED_LOG = "logs/scheduler_log.txt"
@@ -138,17 +138,16 @@ def main() -> None:
             f"勝率{row['勝率']:.1%}  "
             f"{row['月次損益円']:+,.0f}円 ({row['月次損益率']:+.2%})  {stop}")
 
-    # LINE 通知（当月サマリー）
+    # Gmail 通知（当月サマリー）
     latest = monthly.iloc[-1]
     stop_status = "発動中" if latest["月次ストップ発動"] else "なし"
-    msg = (
-        f"【ST】本日のサマリー\n"
+    body = (
         f"保有中：{holding_count}銘柄\n"
         f"当月損益：{latest['月次損益円']:+,.0f}円\n"
         f"当月勝率：{latest['勝率']:.0%}\n"
         f"月次ストップ：{stop_status}"
     )
-    send_line(msg)
+    send_mail("【ST】本日のサマリー", body)
 
 
 if __name__ == "__main__":
