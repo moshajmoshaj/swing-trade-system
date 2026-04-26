@@ -1,33 +1,35 @@
 """
 src/notifier.py
-Telegram Bot 通知ユーティリティ（requests）
-TELEGRAM_BOT_TOKEN・TELEGRAM_CHAT_ID が未設定の場合はサイレントスキップ。
+ntfy.sh 通知ユーティリティ（requests）
+NTFY_TOPIC が未設定の場合はサイレントスキップ。
 """
 import os
+from urllib.parse import quote
 import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_API_BASE = "https://api.telegram.org/bot{token}/sendMessage"
+_NTFY_BASE = "https://ntfy.sh/{topic}"
 
 
 def send_notify(subject: str, body: str) -> bool:
     """
-    Telegram Bot でメッセージを送信する。
-    メッセージ形式: "{subject}\n{body}"
+    ntfy.sh にプッシュ通知を送信する。
     Returns: True=送信成功, False=スキップまたは失敗
     """
-    token   = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-    if not token or not chat_id:
+    topic = os.getenv("NTFY_TOPIC", "").strip()
+    if not topic:
         return False
 
-    text = f"{subject}\n{body}"
     try:
         resp = requests.post(
-            _API_BASE.format(token=token),
-            json={"chat_id": chat_id, "text": text},
+            _NTFY_BASE.format(topic=topic),
+            data=body.encode("utf-8"),
+            headers={
+                "Title": quote(subject),   # 日本語タイトルはURLエンコード必須
+                "Content-Type": "text/plain; charset=utf-8",
+            },
             timeout=10,
         )
         return resp.status_code == 200
