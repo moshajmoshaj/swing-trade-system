@@ -13,7 +13,7 @@ import pandas as pd
 from openpyxl import load_workbook
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))
-from notifier import send_mail
+from notifier import send_notify
 
 TRADE_LOG = "logs/paper_trade_log.xlsx"
 SCHED_LOG = "logs/scheduler_log.txt"
@@ -147,7 +147,7 @@ def main() -> None:
         f"当月勝率：{latest['勝率']:.0%}\n"
         f"月次ストップ：{stop_status}"
     )
-    send_mail("【ST】本日のサマリー", body)
+    send_notify("【ST】本日のサマリー", body)
 
 
 if __name__ == "__main__":

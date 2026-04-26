@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from openpyxl import load_workbook
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))
-from notifier import send_mail
+from notifier import send_notify
 
 load_dotenv()
 
@@ -171,7 +171,7 @@ def main() -> None:
         rsi_str = f"{rsi:.1f}" if rsi is not None else "N/A"
         body_lines.append(f"　{code} RSI {rsi_str}")
     body_lines.append(f"保有中：{total_held}銘柄")
-    send_mail("【ST】エントリー記録完了", "\n".join(body_lines))
+    send_notify("【ST】エントリー記録完了", "\n".join(body_lines))
 
 
 if __name__ == "__main__":

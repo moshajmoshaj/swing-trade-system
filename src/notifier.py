@@ -1,40 +1,35 @@
 """
 src/notifier.py
-Gmail 通知ユーティリティ（smtplib 標準ライブラリ）
-GMAIL_ADDRESS・GMAIL_APP_PASSWORD が未設定の場合はサイレントスキップ。
+Telegram Bot 通知ユーティリティ（requests）
+TELEGRAM_BOT_TOKEN・TELEGRAM_CHAT_ID が未設定の場合はサイレントスキップ。
 """
 import os
-import smtplib
-from email.mime.text import MIMEText
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_SMTP_HOST = "smtp.gmail.com"
-_SMTP_PORT = 587
+_API_BASE = "https://api.telegram.org/bot{token}/sendMessage"
 
 
-def send_mail(subject: str, body: str) -> bool:
+def send_notify(subject: str, body: str) -> bool:
     """
-    Gmail でメールを自分宛に送信する。
+    Telegram Bot でメッセージを送信する。
+    メッセージ形式: "{subject}\n{body}"
     Returns: True=送信成功, False=スキップまたは失敗
     """
-    address  = os.getenv("GMAIL_ADDRESS", "").strip()
-    password = os.getenv("GMAIL_APP_PASSWORD", "").strip()
-    if not address or not password:
+    token   = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat_id:
         return False
 
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = subject
-    msg["From"]    = address
-    msg["To"]      = address
-
+    text = f"{subject}\n{body}"
     try:
-        with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT) as smtp:
-            smtp.ehlo()
-            smtp.starttls()
-            smtp.login(address, password)
-            smtp.sendmail(address, [address], msg.as_string())
-        return True
+        resp = requests.post(
+            _API_BASE.format(token=token),
+            json={"chat_id": chat_id, "text": text},
+            timeout=10,
+        )
+        return resp.status_code == 200
     except Exception:
         return False
