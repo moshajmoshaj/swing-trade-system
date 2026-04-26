@@ -46,6 +46,8 @@
 
 
 
+## 3. 売買ルール
+
 ### 基本方針
 - 対象市場：東証プライム・現物取引のみ
 - 売買手法：スイングトレード（保有期間1〜10日）
@@ -321,6 +323,8 @@ swing-trade-system/
 | 78b886c | docs: 目標・資金計画・人生設計前提を現実的に見直し(Version 2.1) |
 | b9ced27 | Phase4開始: scanner・バッチ・タスクスケジューラ設定完了(Version 2.2) |
 | cd27f1b | Phase4完全自動化: auto_entry/exit/report追加・17:00実行設定 |
+| be2be15 | feat: ntfy通知追加・Gmail/Telegram削除(Version 2.3) |
+| de5045d | docs: ntfy通知追加・プロジェクト構成更新(Version 2.5) |
 
 ---
 
