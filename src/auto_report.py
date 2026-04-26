@@ -11,6 +11,9 @@ from datetime import datetime
 from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent))
+from notifier import send_line
 
 TRADE_LOG = "logs/paper_trade_log.xlsx"
 SCHED_LOG = "logs/scheduler_log.txt"
@@ -113,6 +116,12 @@ def main() -> None:
         wb.close()
         return
 
+    # 保有中銘柄数を取得
+    holding_count = sum(
+        1 for row in ws_trade.iter_rows(min_row=2, values_only=True)
+        if row[0] is not None and str(row[12]).strip() == "保有中"
+    )
+
     monthly = build_monthly_summary(df, capital)
     update_summary_sheet(ws_summary, monthly)
     wb.save(TRADE_LOG)
@@ -128,6 +137,18 @@ def main() -> None:
         log(f"  {row['年月']}  {int(row['取引数'])}件  "
             f"勝率{row['勝率']:.1%}  "
             f"{row['月次損益円']:+,.0f}円 ({row['月次損益率']:+.2%})  {stop}")
+
+    # LINE 通知（当月サマリー）
+    latest = monthly.iloc[-1]
+    stop_status = "発動中" if latest["月次ストップ発動"] else "なし"
+    msg = (
+        f"【ST】本日のサマリー\n"
+        f"保有中：{holding_count}銘柄\n"
+        f"当月損益：{latest['月次損益円']:+,.0f}円\n"
+        f"当月勝率：{latest['勝率']:.0%}\n"
+        f"月次ストップ：{stop_status}"
+    )
+    send_line(msg)
 
 
 if __name__ == "__main__":

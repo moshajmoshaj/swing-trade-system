@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 from openpyxl import load_workbook
 import jpholiday
 import jquantsapi
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent))
+from notifier import send_line
 
 load_dotenv()
 
@@ -160,8 +163,9 @@ def main() -> None:
         wb.close()
         return
 
-    today   = date.today()
-    exited  = 0
+    today       = date.today()
+    exited      = 0
+    exits_info  = []   # (code, pnl_yen, reason) for LINE notification
 
     for h in holdings:
         code         = h["code"]
@@ -219,10 +223,19 @@ def main() -> None:
         log(f"EXIT: {code}  理由={reason}  "
             f"決済={exit_price:,.0f}  損益={pnl_yen:+,.0f}円 ({pnl_rate:+.2%})  "
             f"保有{held_days}日")
+        exits_info.append((code, pnl_yen, reason))
         exited += 1
 
     wb.save(TRADE_LOG)
     log(f"INFO: {exited} 件決済記録 → {TRADE_LOG}")
+
+    # LINE 通知（決済結果サマリー）
+    remaining = len(holdings) - exited
+    lines = [f"【ST】決済判定完了\n決済：{exited}件"]
+    for code, pnl, reason in exits_info:
+        lines.append(f"　{code} {pnl:+,.0f}円（{reason}）")
+    lines.append(f"保有中：{remaining}銘柄")
+    send_line("\n".join(lines))
 
     # 月次損失チェック（決済記録後に再集計）
     wb2      = load_workbook(TRADE_LOG)

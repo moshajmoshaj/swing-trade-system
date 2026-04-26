@@ -12,6 +12,9 @@ from datetime import date, datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from openpyxl import load_workbook
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent))
+from notifier import send_line
 
 load_dotenv()
 
@@ -108,9 +111,10 @@ def main() -> None:
         wb.close()
         return
 
-    today    = date.today()
-    next_row = get_next_empty_row(ws_trade)
-    entered  = 0
+    today        = date.today()
+    next_row     = get_next_empty_row(ws_trade)
+    entered      = 0
+    entries_info = []   # (code, rsi) for LINE notification
 
     for _, sig in signals.iterrows():
         if entered >= available:
@@ -152,12 +156,22 @@ def main() -> None:
             f"SL={stop_loss:,.0f}  TP={take_profit:,.0f}  "
             f"RSI={rsi:.1f}  ADX={adx:.1f}")
 
+        entries_info.append((code, rsi))
         held_codes.add(code)
         next_row += 1
         entered  += 1
 
     wb.save(TRADE_LOG)
     log(f"INFO: {entered} 件エントリー記録 → {TRADE_LOG}")
+
+    # LINE 通知（エントリー結果サマリー）
+    total_held = len(holdings) + entered
+    lines = [f"【ST】エントリー記録完了\n新規：{entered}件"]
+    for code, rsi in entries_info:
+        rsi_str = f"{rsi:.1f}" if rsi is not None else "N/A"
+        lines.append(f"　{code} RSI {rsi_str}")
+    lines.append(f"保有中：{total_held}銘柄")
+    send_line("\n".join(lines))
 
 
 if __name__ == "__main__":
