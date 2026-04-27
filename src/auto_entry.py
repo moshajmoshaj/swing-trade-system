@@ -14,10 +14,11 @@ from dotenv import load_dotenv
 from openpyxl import load_workbook
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))
-from notifier import send_notify
+from notifier import send_notify, send_error_notify
 
 load_dotenv()
 
+_SCRIPT      = "auto_entry.py"
 SCANNER_LOG  = "logs/scanner_log.csv"
 TRADE_LOG    = "logs/paper_trade_log.xlsx"
 SCHED_LOG    = "logs/scheduler_log.txt"
@@ -84,11 +85,13 @@ def main() -> None:
         stop_ym = Path(MONTHLY_STOP).read_text(encoding="utf-8").strip()
         if stop_ym == today_ym:
             log(f"SKIP: 月次損失ストップ中 ({today_ym}) - 新規エントリーなし")
+            send_notify("【ST】エントリー", f"月次損失ストップ中 - 新規エントリーなし ({today_ym})")
             return
 
     signals = load_today_signals()
     if signals.empty:
         log("INFO: 本日のシグナル銘柄なし")
+        send_notify("【ST】エントリー", "本日のシグナルなし")
         return
 
     signals = signals.sort_values("RSI14", ascending=False).reset_index(drop=True)
@@ -177,7 +180,21 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
+    except PermissionError as e:
+        log(f"ERROR: PermissionError: {e}")
+        send_error_notify(_SCRIPT, "PermissionError", str(e))
+        sys.exit(1)
+    except FileNotFoundError as e:
+        log(f"ERROR: FileNotFoundError: {e}")
+        send_error_notify(_SCRIPT, "FileNotFoundError", str(e))
+        sys.exit(1)
+    except ValueError as e:
+        log(f"ERROR: ValueError: {e}")
+        send_error_notify(_SCRIPT, "ValueError", str(e))
+        sys.exit(1)
     except Exception as e:
         import traceback
-        log(f"ERROR: {e}\n{traceback.format_exc()}")
+        tb = traceback.format_exc()
+        log(f"ERROR: {type(e).__name__}: {e}\n{tb}")
+        send_error_notify(_SCRIPT, type(e).__name__, str(e))
         sys.exit(1)

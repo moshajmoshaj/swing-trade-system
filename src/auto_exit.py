@@ -15,10 +15,11 @@ import jpholiday
 import jquantsapi
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))
-from notifier import send_notify
+from notifier import send_notify, send_error_notify, call_with_retry
 
 load_dotenv()
 
+_SCRIPT      = "auto_exit.py"
 TRADE_LOG    = "logs/paper_trade_log.xlsx"
 SCHED_LOG    = "logs/scheduler_log.txt"
 MONTHLY_STOP = "logs/monthly_stop.txt"
@@ -149,19 +150,15 @@ def main() -> None:
     if not holdings:
         log("INFO: 保有中ポジションなし")
         wb.close()
+        send_notify("【ST】決済判定", "保有中ポジションなし")
         return
 
     log(f"INFO: 保有中 {len(holdings)} 銘柄の決済判定を開始")
 
-    # 当日価格取得
-    try:
-        client = get_client()
-        codes  = [h["code"] for h in holdings]
-        prices = fetch_today_ohlc(client, codes)
-    except Exception as e:
-        log(f"ERROR: J-Quants API接続失敗 ({e}) - 決済判定スキップ")
-        wb.close()
-        return
+    # 当日価格取得（リトライ付き・失敗時は ConnectionError を上位に伝播）
+    client = call_with_retry(get_client)
+    codes  = [h["code"] for h in holdings]
+    prices = fetch_today_ohlc(client, codes)
 
     today       = date.today()
     exited      = 0
@@ -266,7 +263,25 @@ if __name__ == "__main__":
         f.write("\n========================================\n")
     try:
         main()
+    except PermissionError as e:
+        log(f"ERROR: PermissionError: {e}")
+        send_error_notify(_SCRIPT, "PermissionError", str(e))
+        sys.exit(1)
+    except FileNotFoundError as e:
+        log(f"ERROR: FileNotFoundError: {e}")
+        send_error_notify(_SCRIPT, "FileNotFoundError", str(e))
+        sys.exit(1)
+    except ConnectionError as e:
+        log(f"ERROR: ConnectionError: {e}")
+        send_error_notify(_SCRIPT, "ConnectionError", str(e))
+        sys.exit(1)
+    except ValueError as e:
+        log(f"ERROR: ValueError: {e}")
+        send_error_notify(_SCRIPT, "ValueError", str(e))
+        sys.exit(1)
     except Exception as e:
         import traceback
-        log(f"ERROR: {e}\n{traceback.format_exc()}")
+        tb = traceback.format_exc()
+        log(f"ERROR: {type(e).__name__}: {e}\n{tb}")
+        send_error_notify(_SCRIPT, type(e).__name__, str(e))
         sys.exit(1)

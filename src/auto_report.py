@@ -13,8 +13,9 @@ import pandas as pd
 from openpyxl import load_workbook
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))
-from notifier import send_notify
+from notifier import send_notify, send_error_notify
 
+_SCRIPT   = "auto_report.py"
 TRADE_LOG = "logs/paper_trade_log.xlsx"
 SCHED_LOG = "logs/scheduler_log.txt"
 
@@ -114,6 +115,7 @@ def main() -> None:
     if df.empty:
         log("INFO: 集計対象の完了取引なし")
         wb.close()
+        send_notify("【ST】レポート", "集計対象の完了取引なし")
         return
 
     # 保有中銘柄数を取得
@@ -153,9 +155,23 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
+    except PermissionError as e:
+        log(f"ERROR: PermissionError: {e}")
+        send_error_notify(_SCRIPT, "PermissionError", str(e))
+        sys.exit(1)
+    except FileNotFoundError as e:
+        log(f"ERROR: FileNotFoundError: {e}")
+        send_error_notify(_SCRIPT, "FileNotFoundError", str(e))
+        sys.exit(1)
+    except ValueError as e:
+        log(f"ERROR: ValueError: {e}")
+        send_error_notify(_SCRIPT, "ValueError", str(e))
+        sys.exit(1)
     except Exception as e:
         import traceback
-        log(f"ERROR: {e}\n{traceback.format_exc()}")
+        tb = traceback.format_exc()
+        log(f"ERROR: {type(e).__name__}: {e}\n{tb}")
+        send_error_notify(_SCRIPT, type(e).__name__, str(e))
         sys.exit(1)
     finally:
         os.makedirs("logs", exist_ok=True)

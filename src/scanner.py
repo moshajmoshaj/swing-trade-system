@@ -18,14 +18,19 @@ sys.stdout.reconfigure(encoding="utf-8")
 import pandas as pd
 import pandas_ta as ta
 from datetime import datetime, timedelta
+from pathlib import Path
 from dotenv import load_dotenv
 import jquantsapi
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent))
+from notifier import send_notify, send_error_notify, call_with_retry
 
 load_dotenv()
 
 # ──────────────────────────────────────────
 # 設定
 # ──────────────────────────────────────────
+_SCRIPT          = "scanner.py"
 CANDIDATES_CSV   = "logs/final_candidates.csv"   # 対象30銘柄
 SCANNER_LOG_CSV  = "logs/scanner_log.csv"         # スキャン履歴
 SCHED_LOG        = "logs/scheduler_log.txt"       # スケジューラーログ
@@ -63,8 +68,7 @@ def log(msg: str) -> None:
 def get_client() -> jquantsapi.ClientV2:
     token = os.getenv("JQUANTS_REFRESH_TOKEN")
     if not token:
-        print("エラー: .env に JQUANTS_REFRESH_TOKEN が設定されていません")
-        sys.exit(1)
+        raise EnvironmentError(".env に JQUANTS_REFRESH_TOKEN が設定されていません")
     return jquantsapi.ClientV2(api_key=token)
 
 
@@ -73,8 +77,7 @@ def get_client() -> jquantsapi.ClientV2:
 # ──────────────────────────────────────────
 def load_candidates() -> list[str]:
     if not os.path.exists(CANDIDATES_CSV):
-        print(f"エラー: {CANDIDATES_CSV} が見つかりません")
-        sys.exit(1)
+        raise FileNotFoundError(f"{CANDIDATES_CSV} が見つかりません")
     df = pd.read_csv(CANDIDATES_CSV, dtype=str)
     # Code列を探す（列名が異なる場合も対応）
     col = next((c for c in df.columns if "code" in c.lower()), df.columns[0])
@@ -110,8 +113,7 @@ def fetch_prices(client: jquantsapi.ClientV2, codes: list[str]) -> pd.DataFrame:
             print(f"  警告: {code} の取得失敗 ({e})")
 
     if not dfs:
-        print("エラー: 株価データを取得できませんでした")
-        sys.exit(1)
+        raise ConnectionError("全銘柄の株価データ取得に失敗しました")
 
     all_df = pd.concat(dfs, ignore_index=True)
     all_df["Date"] = pd.to_datetime(all_df["Date"])
@@ -316,7 +318,7 @@ def main():
     print(f"  実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
-    client  = get_client()
+    client  = call_with_retry(get_client)
     codes   = load_candidates()
     all_df  = fetch_prices(client, codes)
 
@@ -330,11 +332,39 @@ def main():
     print("\n完了。シグナル銘柄をpaper_trade_log.xlsxに記録してください。")
     log("scanner.py 完了")
 
+    signals = result_df[result_df["Signal"] == True] if not result_df.empty else result_df
+    if signals.empty:
+        notify_body = "本日のシグナルなし"
+    else:
+        lines = [f"シグナル：{len(signals)}件"]
+        for _, row in signals.iterrows():
+            lines.append(f"  {row['Code']}  RSI={row['RSI14']}  ADX={row['ADX14']}")
+        notify_body = "\n".join(lines)
+    send_notify("【ST】スキャン完了", notify_body)
+
 
 if __name__ == "__main__":
     try:
         main()
+    except PermissionError as e:
+        log(f"ERROR: PermissionError: {e}")
+        send_error_notify(_SCRIPT, "PermissionError", str(e))
+        sys.exit(1)
+    except FileNotFoundError as e:
+        log(f"ERROR: FileNotFoundError: {e}")
+        send_error_notify(_SCRIPT, "FileNotFoundError", str(e))
+        sys.exit(1)
+    except ConnectionError as e:
+        log(f"ERROR: ConnectionError: {e}")
+        send_error_notify(_SCRIPT, "ConnectionError", str(e))
+        sys.exit(1)
+    except ValueError as e:
+        log(f"ERROR: ValueError: {e}")
+        send_error_notify(_SCRIPT, "ValueError", str(e))
+        sys.exit(1)
     except Exception as e:
         import traceback
-        log(f"ERROR: {e}\n{traceback.format_exc()}")
+        tb = traceback.format_exc()
+        log(f"ERROR: {type(e).__name__}: {e}\n{tb}")
+        send_error_notify(_SCRIPT, type(e).__name__, str(e))
         sys.exit(1)
