@@ -1,5 +1,5 @@
 # 自動売買システム設計書
-**最終更新：2026年4月26日　Version 2.5**
+**最終更新：2026年4月27日　Version 2.5**
 
 ---
 
@@ -325,6 +325,7 @@ swing-trade-system/
 | cd27f1b | Phase4完全自動化: auto_entry/exit/report追加・17:00実行設定 |
 | be2be15 | feat: ntfy通知追加・Gmail/Telegram削除(Version 2.3) |
 | de5045d | docs: ntfy通知追加・プロジェクト構成更新(Version 2.5) |
+| ea0e621 | fix: scheduler_log.txtのPermissionError修正・ログ書き込みをPython側に統一 |
 
 ---
 
@@ -343,4 +344,4 @@ swing-trade-system/
 ---
 
 *本ドキュメントはフェーズ完了時・重要な変更時に更新する*
-*Last Updated: 2026年4月26日　Version 2.5*
+*Last Updated: 2026年4月27日　Version 2.5*
