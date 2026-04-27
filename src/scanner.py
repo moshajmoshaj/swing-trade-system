@@ -28,6 +28,7 @@ load_dotenv()
 # ──────────────────────────────────────────
 CANDIDATES_CSV   = "logs/final_candidates.csv"   # 対象30銘柄
 SCANNER_LOG_CSV  = "logs/scanner_log.csv"         # スキャン履歴
+SCHED_LOG        = "logs/scheduler_log.txt"       # スケジューラーログ
 DAYS_TO_FETCH    = 250                            # 指標計算に必要な日数（SMA200対応）
 
 # 戦略Aパラメータ（設計書準拠）
@@ -45,6 +46,15 @@ VOL_MA_PERIOD    = 20
 VOL_SURGE_RATIO  = 1.2
 GAP_DOWN_THRESH  = -0.015  # -1.5%
 EARNINGS_WINDOW  = 3       # 決算前後営業日
+
+
+def log(msg: str) -> None:
+    ts   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] [scanner] {msg}"
+    print(line)
+    os.makedirs("logs", exist_ok=True)
+    with open(SCHED_LOG, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
 
 
 # ──────────────────────────────────────────
@@ -300,6 +310,7 @@ def display_and_save(result_df: pd.DataFrame) -> None:
 # メイン
 # ──────────────────────────────────────────
 def main():
+    log("scanner.py 開始")
     print("=" * 60)
     print("  戦略A スイングトレード シグナルスキャナー")
     print(f"  実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -317,7 +328,13 @@ def main():
     display_and_save(result_df)
 
     print("\n完了。シグナル銘柄をpaper_trade_log.xlsxに記録してください。")
+    log("scanner.py 完了")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        log(f"ERROR: {e}\n{traceback.format_exc()}")
+        sys.exit(1)

@@ -157,3 +157,7 @@ if __name__ == "__main__":
         import traceback
         log(f"ERROR: {e}\n{traceback.format_exc()}")
         sys.exit(1)
+    finally:
+        os.makedirs("logs", exist_ok=True)
+        with open(SCHED_LOG, "a", encoding="utf-8") as f:
+            f.write("========================================\n")

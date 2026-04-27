@@ -261,6 +261,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    os.makedirs("logs", exist_ok=True)
+    with open(SCHED_LOG, "a", encoding="utf-8") as f:
+        f.write("\n========================================\n")
     try:
         main()
     except Exception as e:
