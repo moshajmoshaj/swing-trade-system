@@ -25,8 +25,11 @@ def log(msg: str) -> None:
     line = f"[{ts}] [report] {msg}"
     print(line)
     os.makedirs("logs", exist_ok=True)
-    with open(SCHED_LOG, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    try:
+        with open(SCHED_LOG, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except PermissionError:
+        pass
 
 
 def read_config(wb) -> dict:
@@ -175,5 +178,8 @@ if __name__ == "__main__":
         sys.exit(1)
     finally:
         os.makedirs("logs", exist_ok=True)
-        with open(SCHED_LOG, "a", encoding="utf-8") as f:
-            f.write("========================================\n")
+        try:
+            with open(SCHED_LOG, "a", encoding="utf-8") as f:
+                f.write("========================================\n")
+        except PermissionError:
+            pass

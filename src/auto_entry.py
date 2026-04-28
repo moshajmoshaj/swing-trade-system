@@ -33,8 +33,11 @@ def log(msg: str) -> None:
     line = f"[{ts}] [entry] {msg}"
     print(line)
     os.makedirs("logs", exist_ok=True)
-    with open(SCHED_LOG, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    try:
+        with open(SCHED_LOG, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except PermissionError:
+        pass
 
 
 def read_config(wb) -> dict:
