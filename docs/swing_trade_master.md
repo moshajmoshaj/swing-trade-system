@@ -327,6 +327,7 @@ swing-trade-system/
 | de5045d | docs: ntfy通知追加・プロジェクト構成更新(Version 2.5) |
 | ea0e621 | fix: scheduler_log.txtのPermissionError修正・ログ書き込みをPython側に統一 |
 | 9333a0d | feat: 全スクリプトにtry/catch例外処理とntfyエラー通知を追加 |
+| b354118 | fix: run_scanner.batの改行コードをLFからCRLFに変換 |
 
 ---
 
