@@ -1,5 +1,5 @@
 # 自動売買システム設計書
-**最終更新：2026年4月27日　Version 2.5**
+**最終更新：2026年4月28日　Version 2.6**
 
 ---
 
@@ -331,7 +331,6 @@ swing-trade-system/
 | 9333a0d | feat: 全スクリプトにtry/catch例外処理とntfyエラー通知を追加 |
 | b354118 | fix: run_scanner.batの改行コードをLFからCRLFに変換 |
 | c6526bc | feat: auto_report.pyに日次レポート通知を追加 |
-| 9333a0d | fix: 全スクリプトにPermissionError try/except追加 |
 
 ---
 
@@ -350,4 +349,4 @@ swing-trade-system/
 ---
 
 *本ドキュメントはフェーズ完了時・重要な変更時に更新する*
-*Last Updated: 2026年4月27日　Version 2.5*
+*Last Updated: 2026年4月28日　Version 2.6*
