@@ -246,6 +246,7 @@ swing-trade-system/
 | ADXフィルター | ✅ 実装済み | ADX>15に設定 |
 | 決算除外 | ✅ 実装済み | 前後3営業日 |
 | 陽線フィルター | ✅ 実装済み | |
+| PermissionError対策 | ✅ 実装済み | auto_exit/entry/report の log()関数と__main__冒頭をtry/exceptで保護 |
 
 ---
 
@@ -330,6 +331,7 @@ swing-trade-system/
 | 9333a0d | feat: 全スクリプトにtry/catch例外処理とntfyエラー通知を追加 |
 | b354118 | fix: run_scanner.batの改行コードをLFからCRLFに変換 |
 | c6526bc | feat: auto_report.pyに日次レポート通知を追加 |
+| 9333a0d | fix: 全スクリプトにPermissionError try/except追加 |
 
 ---
 
