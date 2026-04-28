@@ -295,6 +295,7 @@ swing-trade-system/
 - `src/auto_entry.py`：シグナル銘柄の自動エントリー記録 ✅完了
 - `src/auto_exit.py`：決済条件自動判定・損益記録 ✅完了
 - `src/auto_report.py`：月次集計自動更新 ✅完了
+- `src/auto_report.py`：日次レポート通知（累計損益・現在資産・達成率）✅完了
 - タスクスケジューラ登録済み（毎日17:00自動実行・土日祝スキップ） ✅完了
 - タスクスケジューラ実行時刻：17:00（J-Quantsデータ配信完了後） ✅完了
 
@@ -328,6 +329,7 @@ swing-trade-system/
 | ea0e621 | fix: scheduler_log.txtのPermissionError修正・ログ書き込みをPython側に統一 |
 | 9333a0d | feat: 全スクリプトにtry/catch例外処理とntfyエラー通知を追加 |
 | b354118 | fix: run_scanner.batの改行コードをLFからCRLFに変換 |
+| c6526bc | feat: auto_report.pyに日次レポート通知を追加 |
 
 ---
 
