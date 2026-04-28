@@ -115,17 +115,33 @@ def main() -> None:
 
     df = load_completed_trades(ws_trade)
 
-    if df.empty:
-        log("INFO: 集計対象の完了取引なし")
-        wb.close()
-        send_notify("【ST】レポート", "集計対象の完了取引なし")
-        return
-
-    # 保有中銘柄数を取得
+    # 保有中銘柄数
     holding_count = sum(
         1 for row in ws_trade.iter_rows(min_row=2, values_only=True)
         if row[0] is not None and str(row[12]).strip() == "保有中"
     )
+
+    # 日次レポート（完了取引ゼロでも常に送信）
+    total_pnl   = float(df["損益円"].sum()) if not df.empty else 0.0
+    current     = capital + total_pnl
+    target_pnl  = capital * 0.02
+    target_asset = capital + target_pnl
+    achievement = (total_pnl / target_pnl * 100) if target_pnl != 0 else 0.0
+    daily_body  = (
+        f"保有中：{holding_count}銘柄\n"
+        f"初期資金：{capital:,.0f}円\n"
+        f"累計確定損益：{total_pnl:+,.0f}円\n"
+        f"現在資産：{current:,.0f}円\n"
+        f"目標（年利8%・3ヶ月）：{target_asset:,.0f}円\n"
+        f"達成率：{achievement:.0f}%"
+    )
+    send_notify("【ST】日次レポート", daily_body)
+    log(f"INFO: 日次レポート送信  累計損益 {total_pnl:+,.0f}円  達成率 {achievement:.0f}%")
+
+    if df.empty:
+        log("INFO: 集計対象の完了取引なし")
+        wb.close()
+        return
 
     monthly = build_monthly_summary(df, capital)
     update_summary_sheet(ws_summary, monthly)
@@ -133,7 +149,6 @@ def main() -> None:
 
     # サマリーログ
     total_trades = int(monthly["取引数"].sum())
-    total_pnl    = float(monthly["月次損益円"].sum())
     log(f"INFO: 集計完了  {len(monthly)} ヶ月 / 計{total_trades}取引 / "
         f"累計損益 {total_pnl:+,.0f}円 → {TRADE_LOG}")
 
@@ -142,17 +157,6 @@ def main() -> None:
         log(f"  {row['年月']}  {int(row['取引数'])}件  "
             f"勝率{row['勝率']:.1%}  "
             f"{row['月次損益円']:+,.0f}円 ({row['月次損益率']:+.2%})  {stop}")
-
-    # Gmail 通知（当月サマリー）
-    latest = monthly.iloc[-1]
-    stop_status = "発動中" if latest["月次ストップ発動"] else "なし"
-    body = (
-        f"保有中：{holding_count}銘柄\n"
-        f"当月損益：{latest['月次損益円']:+,.0f}円\n"
-        f"当月勝率：{latest['勝率']:.0%}\n"
-        f"月次ストップ：{stop_status}"
-    )
-    send_notify("【ST】本日のサマリー", body)
 
 
 if __name__ == "__main__":
