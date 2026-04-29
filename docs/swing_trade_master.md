@@ -1,5 +1,5 @@
 # 自動売買システム設計書
-**最終更新：2026年4月29日　Version 3.4**
+**最終更新：2026年4月29日　Version 3.5**
 
 ---
 
@@ -248,7 +248,7 @@
 | 戦略A | 🔄 Phase4稼働中 | **+4.51%**（改善後） | 15% |
 | 戦略C | 🔄 Phase4稼働中 | **+4.40%**（改善後） | — |
 | 戦略D | 🔄 Phase4稼働中 | **+0.55%**（改善後） | — |
-| 戦略E | 🔄 バックテスト完了・実装待ち | **+7.56%** | — |
+| 戦略E | 🔄 Phase4稼働中 | **+7.56%** | — |
 | **合計目標** | — | **約+5〜8%（推定）** | **15%** |
 
 > ⚠️ **2026-04-29 改善完了**：p値フィルター（有意水準10%）＋TP倍率引き上げにより全戦略がOOSでプラス転換。戦略Eが最高年利+7.56%。ただし目標年利15%まで残り約7pt。Phase 4の実データ蓄積後にさらなる改善を検討。Phase 5（実運用）への移行条件は未達。
@@ -295,20 +295,23 @@ swing-trade-system/
 ├── .env                         ← APIキー（GitHubに上げない）
 ├── .gitignore                   ← parquetファイル除外済み
 ├── requirements.txt
-├── oos_backtest.py              ✅ OOSバックテスト（ベクトル化・取引コスト込み）
-├── oos_backtest_cd.py           ✅ 戦略C/D OOSバックテスト（取引コスト込み）
-├── step3_combined.py            ✅ 戦略A+B統合バックテスト
+├── oos_backtest.py              ✅ 戦略A OOSバックテスト（コスト込み・p値フィルター）
+├── oos_backtest_cd.py           ✅ 戦略C/D/E OOSバックテスト（コスト込み・p値フィルター）
+├── step3_combined.py            ✅ 戦略A+B統合バックテスト（参考保存）
 ├── src/
 │   ├── data_fetcher.py          ✅ J-Quants API接続・銘柄一覧取得
 │   ├── indicators.py            ✅ テクニカル指標計算
-│   ├── strategy.py              ✅ 戦略Aシグナル生成（最適化済み）
+│   ├── strategy.py              ✅ 戦略Aシグナル生成
 │   ├── strategy_b.py            ✅ 戦略Bシグナル生成（不採用・保存のみ）
+│   ├── strategy_c.py            ✅ 戦略Cシグナル生成（平均回帰・逆張り）
+│   ├── strategy_d.py            ✅ 戦略Dシグナル生成（ギャップアップ翌日）
+│   ├── strategy_e.py            ✅ 戦略Eシグナル生成（52週高値ブレイクアウト）
 │   ├── backtest.py              ✅ 単銘柄バックテスト（ベクトル化済み）
 │   ├── portfolio_backtest.py    ✅ ポートフォリオバックテスト
-│   ├── scanner.py               ✅ 毎日のシグナルスキャン
-│   ├── auto_entry.py            ✅ シグナル銘柄の自動エントリー記録
-│   ├── auto_exit.py             ✅ 決済条件自動判定・損益記録
-│   ├── auto_report.py           ✅ 月次集計自動更新
+│   ├── scanner.py               ✅ 戦略A/C/D/E 4戦略シグナルスキャン（約230銘柄）
+│   ├── auto_entry.py            ✅ シグナル銘柄の自動エントリー記録（戦略別対応）
+│   ├── auto_exit.py             ✅ 決済条件自動判定（戦略別保有日数：A=10・C=7・D=5・E=10）
+│   ├── auto_report.py           ✅ 月次集計・戦略別損益日次通知
 │   ├── notifier.py              ✅ ntfyスマホ通知
 │   ├── check_bizday.py          ✅ 土日・祝日判定
 │   ├── get_ts.py                ✅ タイムスタンプ取得ヘルパー
@@ -318,9 +321,11 @@ swing-trade-system/
 │   └── raw/                     ← parquetファイル（Git管理外・再取得可能）
 │       └── prices_10y.parquet      全銘柄10年分（90.3MB・約2.5分で再取得）
 ├── logs/
-│   ├── candidates.csv           ✅ 運用候補708銘柄
-│   ├── final_candidates.csv     ✅ 絞り込み後30銘柄
-│   └── portfolio_result.png     ✅ 損益曲線グラフ
+│   ├── candidates.csv              ✅ 運用候補708銘柄
+│   ├── final_candidates.csv        ✅ 戦略A候補30銘柄（p値フィルター後）
+│   ├── strategy_c_candidates.csv   ✅ 戦略C候補20銘柄（p値フィルター後）
+│   ├── strategy_d_candidates.csv   ✅ 戦略D候補10銘柄（p値フィルター後）
+│   └── strategy_e_candidates.csv   ✅ 戦略E候補30銘柄（p値フィルター後）
 └── docs/
     └── swing_trade_master.md    ← 本設計書
 ```
@@ -470,7 +475,7 @@ swing-trade-system/
 - スマホ通知：ntfy（トピック：swing-trade-moshaj-2026）
 - 実行フロー：
   ① `auto_exit.py`：保有銘柄の決済判定（戦略別保有日数：A=10日・C=7日・D=5日）
-  ② `scanner.py`：戦略A/C/D 約202銘柄シグナルスキャン
+  ② `scanner.py`：戦略A/C/D/E 約230銘柄シグナルスキャン
   ③ `auto_entry.py`：RSI降順・空き枠にエントリー記録（Strategy列に戦略種別を記録）
   ④ `auto_report.py`：月次集計・戦略別損益を日次通知
 - ログ確認：`logs/scheduler_log.txt`
@@ -500,7 +505,7 @@ swing-trade-system/
 | 順序 | スクリプト | 処理内容 |
 |------|-----------|---------|
 | ① | `auto_exit.py` | 保有銘柄の損切り/利確/強制終了（戦略別保有日数適用）・損益記録 |
-| ② | `scanner.py` | 戦略A/C/D 約202銘柄シグナルスキャン |
+| ② | `scanner.py` | 戦略A/C/D/E 約230銘柄シグナルスキャン |
 | ③ | `auto_entry.py` | RSI降順・空き枠にエントリー記録（Strategy列書き込み） |
 | ④ | `auto_report.py` | 月次集計・戦略別損益を日次通知 |
 
@@ -540,6 +545,7 @@ swing-trade-system/
 | a8eea7f | feat: IS選定にp値フィルター追加・TP×6に変更→OOS年利+4.51%に改善 |
 | 21dfa9b | feat: 戦略C/Dにp値フィルター・TP倍率改善→C:+4.40% D:+0.55%に改善 |
 | 490da00 | feat: 戦略E（52週高値ブレイクアウト）実装・OOS年利+7.56% |
+| baf4bb0 | feat: 戦略Eをスキャナー・auto_exitに組み込み・候補30銘柄CSV追加 |
 
 ---
 
@@ -558,4 +564,4 @@ swing-trade-system/
 ---
 
 *本ドキュメントはフェーズ完了時・重要な変更時に更新する*
-*Last Updated: 2026年4月29日　Version 3.4*
+*Last Updated: 2026年4月29日　Version 3.5*
