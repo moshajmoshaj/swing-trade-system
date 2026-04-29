@@ -49,6 +49,14 @@ ATR_TP_MULT     = 3
 ATR_STOP_MULT   = 2
 MAX_HOLD_DAYS   = 10
 
+# ── 取引コスト設定 ───────────────────────────────────────────
+# 片道コスト = 手数料 + スリッページ
+# 手数料: SBI/楽天等スタンダードプラン相当 0.055%
+# スリッページ: 東証プライム流動株の推定値 0.05%
+COMMISSION_RATE = 0.00055
+SLIPPAGE_RATE   = 0.00050
+COST_PER_LEG    = COMMISSION_RATE + SLIPPAGE_RATE  # 片道 0.105%
+
 DATA_PATH = Path("data/raw/prices_10y.parquet")
 
 
@@ -79,11 +87,12 @@ def run_single_backtest(df: pd.DataFrame, bt_start: pd.Timestamp, bt_end: pd.Tim
             elif hold_days >= MAX_HOLD_DAYS:
                 exit_price, exit_reason = cl, "期間満了"
             if exit_price is not None:
-                pnl = (exit_price - entry_price) * shares
+                cost = (entry_price + exit_price) * shares * COST_PER_LEG
+                pnl = (exit_price - entry_price) * shares - cost
                 capital += pnl
                 trades.append({"entry_date": entry_date, "exit_date": row["Date"],
                                "entry_price": entry_price, "exit_price": exit_price,
-                               "shares": shares, "pnl": pnl, "reason": exit_reason})
+                               "shares": shares, "pnl": pnl, "cost": cost, "reason": exit_reason})
                 in_trade = False
         equity.append((row["Date"], capital))
 
@@ -284,7 +293,8 @@ def run_is_backtest_vectorized(df_all: pd.DataFrame,
     valid    = ~np.isnan(exit_px)
     sig_pos  = sig_pos[valid];  entry_open = entry_open[valid]
     exit_px  = exit_px[valid];  shares     = shares[valid]
-    pnl      = (exit_px - entry_open) * shares
+    cost     = (entry_open + exit_px) * shares * COST_PER_LEG
+    pnl      = (exit_px - entry_open) * shares - cost
     codes_v  = df["Code"].to_numpy()[sig_pos]
 
     print(f"      完了: {time.time()-t2:.1f}秒  有効トレード: {len(pnl):,}件")
@@ -447,7 +457,8 @@ def run_portfolio_backtest(stock_data: dict, names: dict,
             elif pos.hold_days >= MAX_HOLD_DAYS:
                 ep, er = cl, "期間満了"
             if ep is not None:
-                pnl = (ep - pos.entry_price) * pos.shares
+                cost = (pos.entry_price + ep) * pos.shares * COST_PER_LEG
+                pnl = (ep - pos.entry_price) * pos.shares - cost
                 capital += pnl
                 trades.append(Trade(pos.code, pos.name, pos.entry_date, today,
                                     pos.entry_price, ep, pos.shares, pnl, er))
@@ -512,9 +523,9 @@ def run_portfolio_backtest(stock_data: dict, names: dict,
 
 
 def compute_stats(trades: list, equity: pd.Series) -> dict:
-    total    = len(trades)
-    wins     = [t for t in trades if t.pnl > 0]
-    win_rate = len(wins) / total * 100 if total else 0
+    total     = len(trades)
+    wins      = [t for t in trades if t.pnl > 0]
+    win_rate  = len(wins) / total * 100 if total else 0
     final_pnl = equity.iloc[-1] - INITIAL_CAPITAL
     years     = (OOS_END - OOS_START).days / 365
     annual    = ((equity.iloc[-1] / INITIAL_CAPITAL) ** (1 / years) - 1) * 100
@@ -522,9 +533,13 @@ def compute_stats(trades: list, equity: pd.Series) -> dict:
     max_dd    = ((equity - peak) / peak * 100).min()
     monthly   = equity.resample("ME").last().diff()
     monthly.iloc[0] = equity.resample("ME").last().iloc[0] - INITIAL_CAPITAL
+    total_cost = sum(
+        (t.entry_price + t.exit_price) * t.shares * COST_PER_LEG
+        for t in trades
+    )
     return {"total": total, "win_rate": win_rate, "final_pnl": final_pnl,
             "annual": annual, "max_dd": max_dd, "monthly": monthly,
-            "final_cap": equity.iloc[-1]}
+            "final_cap": equity.iloc[-1], "total_cost": total_cost}
 
 
 def main() -> None:
@@ -664,6 +679,9 @@ def main() -> None:
     print(f"  総取引数      : {stats['total']:>12} 回")
     print(f"  勝率          : {stats['win_rate']:>11.1f} %")
     print(f"  最大DD        : {stats['max_dd']:>11.2f} %")
+    print(f"  ── 取引コスト内訳 ──────────────────────────────")
+    print(f"  総コスト      : {stats['total_cost']:>12,.0f} 円  ← 手数料+スリッページ(片道{COST_PER_LEG*100:.3f}%)")
+    print(f"  1取引平均コスト: {stats['total_cost']/max(stats['total'],1):>11,.0f} 円")
     print()
 
     # 月別損益

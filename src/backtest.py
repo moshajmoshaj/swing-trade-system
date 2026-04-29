@@ -28,6 +28,10 @@ INITIAL_CAPITAL = 1_000_000
 ATR_STOP_MULT   = 2
 ATR_TP_MULT     = 3
 MAX_HOLD_DAYS   = 10
+
+COMMISSION_RATE = 0.00055
+SLIPPAGE_RATE   = 0.00050
+COST_PER_LEG    = COMMISSION_RATE + SLIPPAGE_RATE
 PRIME_CACHE     = Path("data/raw/prices_10y.parquet")
 CANDIDATE_CSV   = Path("logs/candidates.csv")
 
@@ -167,12 +171,13 @@ def run_backtest(df: pd.DataFrame, backtest_start: str = "") -> dict:
                 exit_price, exit_reason = cl, "期間満了"
 
             if exit_price is not None:
-                pnl = (exit_price - entry_price) * shares
+                cost = (entry_price + exit_price) * shares * COST_PER_LEG
+                pnl = (exit_price - entry_price) * shares - cost
                 capital += pnl
                 trades.append({
                     "entry_date": entry_date, "exit_date": row["Date"],
                     "entry_price": entry_price, "exit_price": exit_price,
-                    "shares": shares, "pnl": pnl, "reason": exit_reason,
+                    "shares": shares, "pnl": pnl, "cost": cost, "reason": exit_reason,
                 })
                 in_trade = False
 
