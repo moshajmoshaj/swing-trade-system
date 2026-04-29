@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from indicators import add_indicators
 from strategy_c import generate_signals as gen_c
 from strategy_d import generate_signals as gen_d
+from strategy_e import generate_signals as gen_e
 
 load_dotenv()
 
@@ -43,17 +44,19 @@ COST_PER_LEG    = COMMISSION_RATE + SLIPPAGE_RATE
 P_VALUE_MAX = 0.10  # 二項検定p値上限（IS過適合対策）
 
 PARAMS = {
-    "C": dict(atr_tp=2.5, atr_sl=1.5, max_hold=7,       # TP:1.5→2.5（リスクリワード改善）
+    "C": dict(atr_tp=2.5, atr_sl=1.5, max_hold=7,
               min_trades=5, min_win_rate=40.0, max_dd=-5.0, min_pnl=10_000, target_n=35),
-    "D": dict(atr_tp=4.5, atr_sl=1.5, max_hold=5,       # TP:3.0→4.5（エッジ拡大）
+    "D": dict(atr_tp=4.5, atr_sl=1.5, max_hold=5,
               min_trades=3, min_win_rate=50.0, max_dd=-5.0, min_pnl=10_000, target_n=50),
+    "E": dict(atr_tp=6.0, atr_sl=2.0, max_hold=10,      # 52週高値ブレイクアウト（戦略A同等設定）
+              min_trades=10, min_win_rate=60.0, max_dd=-3.0, min_pnl=30_000, target_n=30),
 }
 
 
 def run_is_backtest(df_all: pd.DataFrame, strategy: str) -> dict:
     """IS期間 全銘柄バックテスト（ベクトル化・コスト込み）"""
     p    = PARAMS[strategy]
-    gen  = gen_c if strategy == "C" else gen_d
+    gen  = gen_c if strategy == "C" else (gen_d if strategy == "D" else gen_e)
     t0   = time.time()
 
     print(f"  [1/3] 指標・シグナル計算中（{len(df_all):,}行）...")
@@ -172,7 +175,7 @@ def run_is_backtest(df_all: pd.DataFrame, strategy: str) -> dict:
 def run_oos_portfolio(stock_data: dict, names: dict, strategy: str) -> tuple:
     """OOSポートフォリオバックテスト（コスト込み）"""
     p   = PARAMS[strategy]
-    gen = gen_c if strategy == "C" else gen_d
+    gen = gen_c if strategy == "C" else (gen_d if strategy == "D" else gen_e)
 
     all_dates = sorted({d for df in stock_data.values()
                         for d in df["Date"] if OOS_START <= d <= OOS_END})
@@ -180,6 +183,7 @@ def run_oos_portfolio(stock_data: dict, names: dict, strategy: str) -> tuple:
     for code, df in stock_data.items():
         df2 = add_indicators(df.copy())
         df2 = gen(df2)
+        df2 = df2.drop_duplicates(subset=["Date"], keep="last").reset_index(drop=True)
         lookup[code] = df2.set_index("Date").to_dict("index")
 
     capital   = float(INITIAL_CAPITAL)
@@ -363,6 +367,7 @@ def main() -> None:
 
     run_strategy("C", df_all, name_map, sector_map)
     run_strategy("D", df_all, name_map, sector_map)
+    run_strategy("E", df_all, name_map, sector_map)
 
 
 if __name__ == "__main__":
