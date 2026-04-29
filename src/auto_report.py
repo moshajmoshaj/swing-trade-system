@@ -45,7 +45,7 @@ def load_completed_trades(ws_trade) -> pd.DataFrame:
     """決済済み（保有中以外）の全取引をDataFrameで返す"""
     rows = []
     cols = ["日付", "銘柄コード", "エントリー価格", "損切り価格", "利確価格",
-            "ATR", "RSI", "ADX", "決済日", "決済価格", "損益円", "損益率", "決済理由"]
+            "ATR", "RSI", "ADX", "決済日", "決済価格", "損益円", "損益率", "決済理由", "戦略"]
 
     for row in ws_trade.iter_rows(min_row=2, values_only=True):
         if row[0] is None:
@@ -53,7 +53,8 @@ def load_completed_trades(ws_trade) -> pd.DataFrame:
         reason = str(row[12]).strip() if row[12] is not None else ""
         if reason == "保有中" or reason == "":
             continue
-        rows.append(row[:13])
+        strategy = str(row[13]).strip() if len(row) > 13 and row[13] is not None else "A"
+        rows.append(tuple(row[:13]) + (strategy,))
 
     if not rows:
         return pd.DataFrame(columns=cols)
@@ -127,6 +128,16 @@ def main() -> None:
     target_pnl  = capital * 0.02
     target_asset = capital + target_pnl
     achievement = (total_pnl / target_pnl * 100) if target_pnl != 0 else 0.0
+    # 戦略別損益集計
+    strat_lines = []
+    if not df.empty and "戦略" in df.columns:
+        for st in ["A", "C", "D"]:
+            sub = df[df["戦略"] == st]
+            if not sub.empty:
+                st_pnl = sub["損益円"].sum()
+                st_wr  = (sub["損益円"] > 0).mean() * 100
+                strat_lines.append(f"  [{st}] {len(sub)}件 WR{st_wr:.0f}% {st_pnl:+,.0f}円")
+
     daily_body  = (
         f"保有中：{holding_count}銘柄\n"
         f"初期資金：{capital:,.0f}円\n"
@@ -134,6 +145,7 @@ def main() -> None:
         f"現在資産：{current:,.0f}円\n"
         f"目標（年利8%・3ヶ月）：{target_asset:,.0f}円\n"
         f"達成率：{achievement:.0f}%"
+        + ("\n戦略別:\n" + "\n".join(strat_lines) if strat_lines else "")
     )
     send_notify("【ST】日次レポート", daily_body)
     log(f"INFO: 日次レポート送信  累計損益 {total_pnl:+,.0f}円  達成率 {achievement:.0f}%")
