@@ -31,10 +31,12 @@ load_dotenv()
 # 設定
 # ──────────────────────────────────────────
 _SCRIPT          = "scanner.py"
-CANDIDATES_CSV   = "logs/final_candidates.csv"   # 対象30銘柄
-SCANNER_LOG_CSV  = "logs/scanner_log.csv"         # スキャン履歴
-SCHED_LOG        = "logs/scheduler_log.txt"       # スケジューラーログ
-DAYS_TO_FETCH    = 250                            # 指標計算に必要な日数（SMA200対応）
+CANDIDATES_CSV   = "logs/final_candidates.csv"          # 戦略A: 30銘柄
+CANDIDATES_C_CSV = "logs/strategy_c_candidates.csv"     # 戦略C: 35銘柄
+CANDIDATES_D_CSV = "logs/strategy_d_candidates.csv"     # 戦略D: 144銘柄
+SCANNER_LOG_CSV  = "logs/scanner_log.csv"               # スキャン履歴
+SCHED_LOG        = "logs/scheduler_log.txt"             # スケジューラーログ
+DAYS_TO_FETCH    = 250                                  # 指標計算に必要な日数（SMA200対応）
 
 # 戦略Aパラメータ（設計書準拠）
 SMA_SHORT        = 20
@@ -51,6 +53,22 @@ VOL_MA_PERIOD    = 20
 VOL_SURGE_RATIO  = 1.2
 GAP_DOWN_THRESH  = -0.015  # -1.5%
 EARNINGS_WINDOW  = 3       # 決算前後営業日
+
+# 戦略Cパラメータ（平均回帰・逆張り）
+RSI_C_MIN        = 30
+RSI_C_MAX        = 40
+VOL_C_RATIO      = 1.5
+ATR_C_TP         = 1.5
+ATR_C_SL         = 1.5
+MAX_HOLD_C       = 7
+
+# 戦略Dパラメータ（ギャップアップ翌日）
+GAP_D_MIN        = 0.03    # +3%以上
+VOL_D_RATIO      = 1.5
+RSI_D_MIN        = 50
+ATR_D_TP         = 3.0
+ATR_D_SL         = 1.5
+MAX_HOLD_D       = 5
 
 
 def log(msg: str) -> None:
@@ -75,14 +93,12 @@ def get_client() -> jquantsapi.ClientV2:
 # ──────────────────────────────────────────
 # 対象銘柄コード読み込み
 # ──────────────────────────────────────────
-def load_candidates() -> list[str]:
-    if not os.path.exists(CANDIDATES_CSV):
-        raise FileNotFoundError(f"{CANDIDATES_CSV} が見つかりません")
-    df = pd.read_csv(CANDIDATES_CSV, dtype=str)
-    # Code列を探す（列名が異なる場合も対応）
+def load_candidates(path: str = CANDIDATES_CSV) -> list[str]:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{path} が見つかりません")
+    df = pd.read_csv(path, dtype=str)
     col = next((c for c in df.columns if "code" in c.lower()), df.columns[0])
     codes = df[col].str.zfill(4).tolist()
-    print(f"対象銘柄数: {len(codes)} 銘柄")
     return codes
 
 
@@ -223,13 +239,74 @@ def check_signal(row: pd.Series, today: pd.Timestamp, earnings_dates: list) -> t
 
 
 # ──────────────────────────────────────────
+# 戦略Cシグナル判定（平均回帰・逆張り）
+# ──────────────────────────────────────────
+def check_signal_c(df: pd.DataFrame) -> tuple[bool, list[str]]:
+    row = df.iloc[-1]
+    failed = []
+
+    # 条件1: 終値 > SMA200（長期上昇トレンド内）
+    if not (pd.notna(row["SMA200"]) and row["Close"] > row["SMA200"]):
+        failed.append("SMA200")
+
+    # 条件2: RSI 30〜40（短期押し目）
+    if not (pd.notna(row["RSI14"]) and RSI_C_MIN <= row["RSI14"] <= RSI_C_MAX):
+        failed.append(f"RSI({row['RSI14']:.1f})" if pd.notna(row["RSI14"]) else "RSI(NaN)")
+
+    # 条件3: 出来高スパイク（20日平均の1.5倍以上）
+    if not (pd.notna(row["VOL_MA20"]) and row["Volume"] >= row["VOL_MA20"] * VOL_C_RATIO):
+        failed.append("出来高")
+
+    atr   = row["ATR14"] if pd.notna(row["ATR14"]) else None
+    stop  = round(row["Close"] - atr * ATR_C_SL, 1) if atr else None
+    tp    = round(row["Close"] + atr * ATR_C_TP, 1) if atr else None
+    return len(failed) == 0, failed, stop, tp
+
+
+# ──────────────────────────────────────────
+# 戦略Dシグナル判定（ギャップアップ翌日）
+# ──────────────────────────────────────────
+def check_signal_d(df: pd.DataFrame) -> tuple[bool, list[str]]:
+    if len(df) < 3:
+        return False, ["データ不足"], None, None
+
+    today     = df.iloc[-1]
+    yesterday = df.iloc[-2]
+    failed    = []
+
+    # 条件1: 前日ギャップアップ（前日比+3%以上）
+    prev_close = yesterday["PrevClose"]
+    if pd.notna(prev_close) and prev_close > 0:
+        gap = (yesterday["Open"] - prev_close) / prev_close
+        if gap < GAP_D_MIN:
+            failed.append(f"ギャップ不足({gap*100:.1f}%)")
+    else:
+        failed.append("前日終値なし")
+
+    # 条件2: 当日出来高 ≥ 20日平均×1.5
+    if not (pd.notna(today["VOL_MA20"]) and today["Volume"] >= today["VOL_MA20"] * VOL_D_RATIO):
+        failed.append("出来高")
+
+    # 条件3: RSI ≥ 50
+    if not (pd.notna(today["RSI14"]) and today["RSI14"] >= RSI_D_MIN):
+        failed.append(f"RSI({today['RSI14']:.1f})" if pd.notna(today["RSI14"]) else "RSI(NaN)")
+
+    # 条件4: 終値 > SMA200
+    if not (pd.notna(today["SMA200"]) and today["Close"] > today["SMA200"]):
+        failed.append("SMA200")
+
+    atr  = today["ATR14"] if pd.notna(today["ATR14"]) else None
+    stop = round(today["Close"] - atr * ATR_D_SL, 1) if atr else None
+    tp   = round(today["Close"] + atr * ATR_D_TP, 1) if atr else None
+    return len(failed) == 0, failed, stop, tp
+
+
+# ──────────────────────────────────────────
 # スキャン実行
 # ──────────────────────────────────────────
-def run_scan(all_df: pd.DataFrame, codes: list[str], earnings_map: dict) -> pd.DataFrame:
+def run_scan(all_df: pd.DataFrame, codes: list[str], earnings_map: dict,
+             strategy: str = "A") -> pd.DataFrame:
     today = all_df["Date"].max()
-    print(f"\nスキャン基準日: {today.strftime('%Y-%m-%d (%a)')}")
-    print("=" * 60)
-
     results = []
 
     for code in codes:
@@ -240,37 +317,42 @@ def run_scan(all_df: pd.DataFrame, codes: list[str], earnings_map: dict) -> pd.D
         df = add_indicators(df)
         df["RSI14_lag3"] = df["RSI14"].shift(RSI_LOOKBACK)
 
-        # 最新行で判定
         latest = df.iloc[-1]
         if latest["Date"] != today:
-            continue  # 当日データがない銘柄はスキップ
+            continue
 
-        earnings_dates = earnings_map.get(code, [])
-        signal, failed = check_signal(latest, today, earnings_dates)
-
-        entry_price  = latest["Close"]
-        atr          = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
-        stop_loss    = round(entry_price - atr * 2, 1) if atr else None
-        take_profit  = round(entry_price + atr * 4, 1) if atr else None
-        rsi          = round(latest["RSI14"], 1) if pd.notna(latest["RSI14"]) else None
-        adx          = round(latest["ADX14"], 1) if pd.notna(latest.get("ADX14")) else None
+        if strategy == "A":
+            earnings_dates = earnings_map.get(code, [])
+            signal, failed = check_signal(latest, today, earnings_dates)
+            atr = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
+            stop_loss   = round(latest["Close"] - atr * 2, 1) if atr else None
+            take_profit = round(latest["Close"] + atr * 4, 1) if atr else None
+        elif strategy == "C":
+            signal, failed, stop_loss, take_profit = check_signal_c(df)
+            atr = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
+        elif strategy == "D":
+            signal, failed, stop_loss, take_profit = check_signal_d(df)
+            atr = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
+        else:
+            continue
 
         results.append({
+            "Strategy"    : strategy,
             "Code"        : code,
             "Date"        : today.strftime("%Y-%m-%d"),
             "Signal"      : signal,
-            "Close"       : entry_price,
-            "RSI14"       : rsi,
-            "ADX14"       : adx,
+            "Close"       : latest["Close"],
+            "RSI14"       : round(latest["RSI14"], 1) if pd.notna(latest["RSI14"]) else None,
+            "ADX14"       : round(latest["ADX14"], 1) if pd.notna(latest.get("ADX14")) else None,
             "StopLoss"    : stop_loss,
             "TakeProfit"  : take_profit,
             "ATR14"       : round(atr, 1) if atr else None,
             "FailedConds" : ", ".join(failed) if not signal else "",
         })
 
-    cols = ["Code", "Date", "Signal", "Close", "RSI14", "ADX14", "StopLoss", "TakeProfit", "ATR14", "FailedConds"]
+    cols = ["Strategy", "Code", "Date", "Signal", "Close", "RSI14", "ADX14",
+            "StopLoss", "TakeProfit", "ATR14", "FailedConds"]
     if not results:
-        print("  (スキャン対象銘柄なし: データ不足または当日データなし)")
         return pd.DataFrame(columns=cols)
     return pd.DataFrame(results, columns=cols)
 
@@ -279,24 +361,27 @@ def run_scan(all_df: pd.DataFrame, codes: list[str], earnings_map: dict) -> pd.D
 # 結果表示・ログ保存
 # ──────────────────────────────────────────
 def display_and_save(result_df: pd.DataFrame) -> None:
-    signals = result_df[result_df["Signal"] == True].sort_values("RSI14", ascending=False)
+    signals    = result_df[result_df["Signal"] == True].sort_values("RSI14", ascending=False)
     no_signals = result_df[result_df["Signal"] == False]
 
-    print(f"\n【シグナル銘柄】{len(signals)} 件")
-    print("-" * 60)
+    print(f"\n{'='*60}")
+    print(f"【シグナル銘柄】合計 {len(signals)} 件")
+    print(f"{'='*60}")
 
     if signals.empty:
         print("  本日のシグナルなし")
     else:
-        print(f"  {'コード':<8} {'終値':>7} {'RSI':>6} {'ADX':>6} {'損切り':>8} {'利確':>8}")
-        print(f"  {'-'*8} {'-'*7} {'-'*6} {'-'*6} {'-'*8} {'-'*8}")
+        print(f"  {'戦略':<4} {'コード':<6} {'終値':>7} {'RSI':>6} {'損切り':>8} {'利確':>8} {'保有上限':>6}")
+        print(f"  {'-'*4} {'-'*6} {'-'*7} {'-'*6} {'-'*8} {'-'*8} {'-'*6}")
+        hold_map = {"A": "10日", "C": "7日", "D": "5日"}
         for _, row in signals.iterrows():
-            print(f"  {row['Code']:<8} {row['Close']:>7,.0f} {row['RSI14']:>6.1f} "
-                  f"{row['ADX14']:>6.1f} {row['StopLoss']:>8,.0f} {row['TakeProfit']:>8,.0f}")
+            sl  = f"{row['StopLoss']:>8,.0f}" if pd.notna(row["StopLoss"]) else "     ---"
+            tp  = f"{row['TakeProfit']:>8,.0f}" if pd.notna(row["TakeProfit"]) else "     ---"
+            rsi = f"{row['RSI14']:>6.1f}" if pd.notna(row["RSI14"]) else "   N/A"
+            print(f"  {row['Strategy']:<4} {row['Code']:<6} {row['Close']:>7,.0f} {rsi} {sl} {tp} {hold_map.get(row['Strategy'], '---'):>6}")
 
     print(f"\n【非シグナル銘柄】{len(no_signals)} 件（条件未達）")
 
-    # ログ保存
     os.makedirs("logs", exist_ok=True)
     if os.path.exists(SCANNER_LOG_CSV):
         existing = pd.read_csv(SCANNER_LOG_CSV, dtype=str)
@@ -314,31 +399,44 @@ def display_and_save(result_df: pd.DataFrame) -> None:
 def main():
     log("scanner.py 開始")
     print("=" * 60)
-    print("  戦略A スイングトレード シグナルスキャナー")
+    print("  スイングトレード シグナルスキャナー（戦略A/C/D）")
     print(f"  実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
-    client  = call_with_retry(get_client)
-    codes   = load_candidates()
-    all_df  = fetch_prices(client, codes)
+    client = call_with_retry(get_client)
 
-    # 決算日取得（失敗してもスキャンは続行）
+    # 各戦略の候補銘柄を読み込み（重複排除して一括取得）
+    codes_a = load_candidates(CANDIDATES_CSV)
+    codes_c = load_candidates(CANDIDATES_C_CSV) if os.path.exists(CANDIDATES_C_CSV) else []
+    codes_d = load_candidates(CANDIDATES_D_CSV) if os.path.exists(CANDIDATES_D_CSV) else []
+    all_codes = list(dict.fromkeys(codes_a + codes_c + codes_d))  # 順序保持・重複除去
+    print(f"対象銘柄数: A={len(codes_a)} C={len(codes_c)} D={len(codes_d)} 合計（ユニーク）={len(all_codes)}")
+
+    all_df = fetch_prices(client, all_codes)
+
     print("決算日データ取得中...")
-    earnings_map = fetch_earnings_dates(client, codes)
+    earnings_map = fetch_earnings_dates(client, codes_a)
 
-    result_df = run_scan(all_df, codes, earnings_map)
+    today = all_df["Date"].max()
+    print(f"\nスキャン基準日: {today.strftime('%Y-%m-%d (%a)')}")
+
+    df_a = run_scan(all_df, codes_a, earnings_map, strategy="A")
+    df_c = run_scan(all_df, codes_c, {},            strategy="C")
+    df_d = run_scan(all_df, codes_d, {},            strategy="D")
+
+    result_df = pd.concat([df_a, df_c, df_d], ignore_index=True)
     display_and_save(result_df)
 
     print("\n完了。シグナル銘柄をpaper_trade_log.xlsxに記録してください。")
     log("scanner.py 完了")
 
-    signals = result_df[result_df["Signal"] == True] if not result_df.empty else result_df
+    signals = result_df[result_df["Signal"] == True] if not result_df.empty else pd.DataFrame()
     if signals.empty:
         notify_body = "本日のシグナルなし"
     else:
         lines = [f"シグナル：{len(signals)}件"]
         for _, row in signals.iterrows():
-            lines.append(f"  {row['Code']}  RSI={row['RSI14']}  ADX={row['ADX14']}")
+            lines.append(f"  [{row['Strategy']}] {row['Code']}  RSI={row['RSI14']}")
         notify_body = "\n".join(lines)
     send_notify("【ST】スキャン完了", notify_body)
 
