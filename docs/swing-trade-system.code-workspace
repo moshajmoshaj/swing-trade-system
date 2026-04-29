@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		}
+	],
+	"settings": {
+		"window.restoreWindows": "all",
+		"window.restoreFullscreen": true,
+		"workbench.editor.restoreViewState": true
+	}
+}

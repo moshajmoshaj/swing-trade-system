@@ -1,0 +1,8 @@
+{
+  "terminal.integrated.shellArgs.windows": [
+    "-NoExit",
+    "-Command",
+    "claude --dangerously-skip-permissions"
+  ],
+  "terminal.integrated.defaultProfile.windows": "PowerShell"
+}
