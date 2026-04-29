@@ -35,6 +35,7 @@ _SCRIPT          = "scanner.py"
 CANDIDATES_CSV   = "logs/final_candidates.csv"          # 戦略A: 30銘柄
 CANDIDATES_C_CSV = "logs/strategy_c_candidates.csv"     # 戦略C: 35銘柄
 CANDIDATES_D_CSV = "logs/strategy_d_candidates.csv"     # 戦略D: 144銘柄
+CANDIDATES_E_CSV = "logs/strategy_e_candidates.csv"     # 戦略E: 30銘柄
 SCANNER_LOG_CSV  = "logs/scanner_log.csv"               # スキャン履歴
 SCHED_LOG        = "logs/scheduler_log.txt"             # スケジューラーログ
 DAYS_TO_FETCH    = 250                                  # 指標計算に必要な日数（SMA200対応）
@@ -70,6 +71,14 @@ RSI_D_MIN        = 50
 ATR_D_TP         = 3.0
 ATR_D_SL         = 1.5
 MAX_HOLD_D       = 5
+
+# 戦略Eパラメータ（52週高値ブレイクアウト）
+RSI_E_MIN        = 50
+RSI_E_MAX        = 80
+VOL_E_RATIO      = 1.2
+ATR_E_TP         = 6.0
+ATR_E_SL         = 2.0
+MAX_HOLD_E       = 10
 
 
 def log(msg: str) -> None:
@@ -306,6 +315,44 @@ def check_signal_d(df: pd.DataFrame) -> tuple[bool, list[str]]:
 
 
 # ──────────────────────────────────────────
+# 戦略Eシグナル判定（52週高値ブレイクアウト）
+# ──────────────────────────────────────────
+def check_signal_e(df: pd.DataFrame) -> tuple[bool, list[str], float, float]:
+    if len(df) < 200:
+        return False, ["データ不足"], None, None
+
+    row    = df.iloc[-1]
+    failed = []
+
+    # 条件1: 52週高値更新（前日までの252営業日最高値）
+    lookback = min(252, len(df) - 1)
+    high_52w = df["Close"].iloc[-lookback - 1:-1].max()
+    if not (row["Close"] > high_52w):
+        failed.append(f"52週高値未達({high_52w:,.0f})")
+
+    # 条件2: 出来高フィルター（20日平均の1.2倍以上）
+    if not (pd.notna(row["VOL_MA20"]) and row["Volume"] >= row["VOL_MA20"] * VOL_E_RATIO):
+        failed.append("出来高")
+
+    # 条件3: 終値 > SMA200
+    if not (pd.notna(row["SMA200"]) and row["Close"] > row["SMA200"]):
+        failed.append("SMA200")
+
+    # 条件4: RSI 50〜80（過熱除外）
+    if not (pd.notna(row["RSI14"]) and RSI_E_MIN <= row["RSI14"] <= RSI_E_MAX):
+        failed.append(f"RSI({row['RSI14']:.1f})" if pd.notna(row["RSI14"]) else "RSI(NaN)")
+
+    # 条件5: 陽線
+    if not (row["Close"] > row["Open"]):
+        failed.append("陰線")
+
+    atr  = row["ATR14"] if pd.notna(row["ATR14"]) else None
+    stop = round(row["Close"] - atr * ATR_E_SL, 1) if atr else None
+    tp   = round(row["Close"] + atr * ATR_E_TP, 1) if atr else None
+    return len(failed) == 0, failed, stop, tp
+
+
+# ──────────────────────────────────────────
 # スキャン実行
 # ──────────────────────────────────────────
 def run_scan(all_df: pd.DataFrame, codes: list[str], earnings_map: dict,
@@ -336,6 +383,9 @@ def run_scan(all_df: pd.DataFrame, codes: list[str], earnings_map: dict,
             atr = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
         elif strategy == "D":
             signal, failed, stop_loss, take_profit = check_signal_d(df)
+            atr = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
+        elif strategy == "E":
+            signal, failed, stop_loss, take_profit = check_signal_e(df)
             atr = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
         else:
             continue
@@ -377,7 +427,7 @@ def display_and_save(result_df: pd.DataFrame) -> None:
     else:
         print(f"  {'戦略':<4} {'コード':<6} {'終値':>7} {'RSI':>6} {'損切り':>8} {'利確':>8} {'保有上限':>6}")
         print(f"  {'-'*4} {'-'*6} {'-'*7} {'-'*6} {'-'*8} {'-'*8} {'-'*6}")
-        hold_map = {"A": "10日", "C": "7日", "D": "5日"}
+        hold_map = {"A": "10日", "C": "7日", "D": "5日", "E": "10日"}
         for _, row in signals.iterrows():
             sl  = f"{row['StopLoss']:>8,.0f}" if pd.notna(row["StopLoss"]) else "     ---"
             tp  = f"{row['TakeProfit']:>8,.0f}" if pd.notna(row["TakeProfit"]) else "     ---"
@@ -413,8 +463,9 @@ def main():
     codes_a = load_candidates(CANDIDATES_CSV)
     codes_c = load_candidates(CANDIDATES_C_CSV) if os.path.exists(CANDIDATES_C_CSV) else []
     codes_d = load_candidates(CANDIDATES_D_CSV) if os.path.exists(CANDIDATES_D_CSV) else []
-    all_codes = list(dict.fromkeys(codes_a + codes_c + codes_d))  # 順序保持・重複除去
-    print(f"対象銘柄数: A={len(codes_a)} C={len(codes_c)} D={len(codes_d)} 合計（ユニーク）={len(all_codes)}")
+    codes_e = load_candidates(CANDIDATES_E_CSV) if os.path.exists(CANDIDATES_E_CSV) else []
+    all_codes = list(dict.fromkeys(codes_a + codes_c + codes_d + codes_e))
+    print(f"対象銘柄数: A={len(codes_a)} C={len(codes_c)} D={len(codes_d)} E={len(codes_e)} 合計（ユニーク）={len(all_codes)}")
 
     all_df = fetch_prices(client, all_codes)
 
@@ -427,8 +478,9 @@ def main():
     df_a = run_scan(all_df, codes_a, earnings_map, strategy="A")
     df_c = run_scan(all_df, codes_c, {},            strategy="C")
     df_d = run_scan(all_df, codes_d, {},            strategy="D")
+    df_e = run_scan(all_df, codes_e, {},            strategy="E")
 
-    result_df = pd.concat([df_a, df_c, df_d], ignore_index=True)
+    result_df = pd.concat([df_a, df_c, df_d, df_e], ignore_index=True)
     display_and_save(result_df)
 
     print("\n完了。シグナル銘柄をpaper_trade_log.xlsxに記録してください。")
