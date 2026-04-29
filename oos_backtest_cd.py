@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
+from scipy.stats import binom
 import jquantsapi
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -39,10 +40,12 @@ SLIPPAGE_RATE   = 0.00050
 COST_PER_LEG    = COMMISSION_RATE + SLIPPAGE_RATE
 
 # ── 戦略別パラメータ ─────────────────────────────────────────
+P_VALUE_MAX = 0.10  # 二項検定p値上限（IS過適合対策）
+
 PARAMS = {
-    "C": dict(atr_tp=1.5, atr_sl=1.5, max_hold=7,
+    "C": dict(atr_tp=2.5, atr_sl=1.5, max_hold=7,       # TP:1.5→2.5（リスクリワード改善）
               min_trades=5, min_win_rate=40.0, max_dd=-5.0, min_pnl=10_000, target_n=35),
-    "D": dict(atr_tp=3.0, atr_sl=1.5, max_hold=5,
+    "D": dict(atr_tp=4.5, atr_sl=1.5, max_hold=5,       # TP:3.0→4.5（エッジ拡大）
               min_trades=3, min_win_rate=50.0, max_dd=-5.0, min_pnl=10_000, target_n=50),
 }
 
@@ -152,13 +155,15 @@ def run_is_backtest(df_all: pd.DataFrame, strategy: str) -> dict:
         total = len(p_)
         if total < PARAMS[strategy]["min_trades"]:
             continue
-        win_rate  = float((p_ > 0).sum() / total * 100)
+        wins      = int((p_ > 0).sum())
+        win_rate  = float(wins / total * 100)
         final_pnl = float(p_.sum())
         eq        = np.concatenate([[INITIAL_CAPITAL], INITIAL_CAPITAL + np.cumsum(p_)])
         peak      = np.maximum.accumulate(eq)
         max_dd    = float(((eq - peak) / peak * 100).min())
+        p_value   = float(1 - binom.cdf(wins - 1, total, 0.5))
         results[code] = {"total": total, "win_rate": win_rate,
-                         "max_dd": max_dd, "final_pnl": final_pnl}
+                         "max_dd": max_dd, "final_pnl": final_pnl, "p_value": p_value}
 
     print(f"      有効銘柄: {len(results)}  総経過: {time.time()-t0:.1f}秒")
     return results
@@ -280,10 +285,11 @@ def run_strategy(strategy: str, df_all: pd.DataFrame, name_map: dict, sector_map
     # フィルタリング
     print(f"\n【STEP2】選定基準フィルタリング")
     candidates = {c: r for c, r in is_results.items()
-                  if r["win_rate"] >= p["min_win_rate"]
-                  and r["max_dd"]  >= p["max_dd"]
-                  and r["final_pnl"] >= p["min_pnl"]}
-    print(f"  基準通過: {len(candidates)} 銘柄")
+                  if r["win_rate"]           >= p["min_win_rate"]
+                  and r["max_dd"]            >= p["max_dd"]
+                  and r["final_pnl"]         >= p["min_pnl"]
+                  and r.get("p_value", 1.0)  <= P_VALUE_MAX}
+    print(f"  基準通過: {len(candidates)} 銘柄（p値{P_VALUE_MAX}以下フィルター適用）")
 
     scored = sorted(candidates.items(),
                     key=lambda x: x[1]["win_rate"] * (1 - abs(x[1]["max_dd"]) / 100),
@@ -323,13 +329,13 @@ def run_strategy(strategy: str, df_all: pd.DataFrame, name_map: dict, sector_map
 
     # 選定銘柄リスト表示
     print(f"\n【選定{len(selected)}銘柄（IS成績順）】")
-    print(f"  {'コード':6}  {'銘柄名':18}  {'勝率':>6}  {'DD':>6}  {'損益':>10}  {'取引':>4}")
-    print("  " + "-" * 58)
+    print(f"  {'コード':6}  {'銘柄名':18}  {'勝率':>6}  {'DD':>6}  {'損益':>10}  {'取引':>4}  {'p値':>6}")
+    print("  " + "-" * 66)
     for code in selected[:20]:
         r   = candidates[code]
         nm  = name_map.get(code, code)[:16]
         print(f"  {code:6}  {nm:18}  {r['win_rate']:5.1f}%  "
-              f"{r['max_dd']:5.1f}%  {r['final_pnl']:>10,.0f}  {r['total']:>4}")
+              f"{r['max_dd']:5.1f}%  {r['final_pnl']:>10,.0f}  {r['total']:>4}  {r.get('p_value',1.0):5.3f}")
     if len(selected) > 20:
         print(f"  ... 他{len(selected)-20}銘柄")
 
