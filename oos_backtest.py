@@ -45,9 +45,10 @@ MAX_PER_SEC33 = 3        # 業種33分類で同一業種の上限
 INITIAL_CAPITAL = 1_000_000
 MAX_POSITIONS   = 5
 MAX_POS_RATIO   = 0.20
-ATR_TP_MULT     = 3
+ATR_TP_MULT     = 4   # 確定ベスト設定（TP×4）
 ATR_STOP_MULT   = 2
 MAX_HOLD_DAYS   = 10
+ADX_THRESHOLD   = 15  # 確定ベスト設定（ADX>15）
 
 # ── 取引コスト設定 ───────────────────────────────────────────
 # 片道コスト = 手数料 + スリッページ
@@ -248,7 +249,7 @@ def run_is_backtest_vectorized(df_all: pd.DataFrame,
             sig_dates[i]   not in earnings_excl.get(codes_a_e[sig_pos[i]], set()) and
             entry_dates[i] not in earnings_excl.get(codes_a_e[sig_pos[i]], set())
             for i in range(len(sig_pos))
-        ])
+        ], dtype=bool)
         sig_pos    = sig_pos[keep]
         entry_open = entry_open[keep]
         print(f"      決算除外後シグナル: {len(sig_pos):,}件")
@@ -554,6 +555,8 @@ def main() -> None:
     print("\nデータ読み込み中...")
     df_all = pd.read_parquet(DATA_PATH)
     df_all["Date"] = pd.to_datetime(df_all["Date"])
+    # parquet の Code 列は壊れている場合があるため Code4（4桁）から5桁コードを再生成
+    df_all["Code"] = df_all["Code4"].astype(str) + "0"
     df_all = df_all.sort_values(["Code", "Date"]).reset_index(drop=True)
     print(f"  {len(df_all):,} 行  {df_all['Code'].nunique():,} 銘柄")
 
@@ -577,7 +580,8 @@ def main() -> None:
                  if c in df_all.columns]
     df_clean = df_all.drop(columns=drop_cols).sort_values(["Code", "Date"]).reset_index(drop=True)
 
-    is_results = run_is_backtest_vectorized(df_clean, earnings_excl=earnings_excl)
+    is_results = run_is_backtest_vectorized(df_clean, earnings_excl=earnings_excl,
+                                            adx_threshold=ADX_THRESHOLD)
     print(f"  IS完了: {len(is_results)} 銘柄が取引あり  総経過: {time.time()-t0:.1f}秒")
 
     # ── 銘柄フィルタリング ──────────────────────────────────
@@ -646,7 +650,9 @@ def main() -> None:
     # ── OOSポートフォリオバックテスト ──────────────────────
     print(f"\n【STEP4】OOSポートフォリオバックテスト実行中...")
     trades, equity = run_portfolio_backtest(stock_data_oos, names_oos,
-                                            earnings_excl=earnings_excl)
+                                            earnings_excl=earnings_excl,
+                                            adx_threshold=ADX_THRESHOLD,
+                                            atr_tp_mult=ATR_TP_MULT)
     stats = compute_stats(trades, equity)
 
     # ── 結果表示 ────────────────────────────────────────────
