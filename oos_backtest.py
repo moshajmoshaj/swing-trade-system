@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
+from scipy.stats import binom
 import jquantsapi
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -40,12 +41,13 @@ MAX_DD        = -3.0     # -3%以内
 MIN_PNL       = 30_000
 TARGET_N      = 30
 MAX_PER_SEC33 = 3        # 業種33分類で同一業種の上限
+P_VALUE_MAX   = 0.10     # 二項検定p値上限（有意水準10%）← IS過適合対策
 
 # ── バックテスト設定 ────────────────────────────────────────
 INITIAL_CAPITAL = 1_000_000
 MAX_POSITIONS   = 5
 MAX_POS_RATIO   = 0.20
-ATR_TP_MULT     = 4   # 確定ベスト設定（TP×4）
+ATR_TP_MULT     = 6   # 改善設定（TP×6）：コスト比改善のため4→6に引き上げ
 ATR_STOP_MULT   = 2
 MAX_HOLD_DAYS   = 10
 ADX_THRESHOLD   = 15  # 確定ベスト設定（ADX>15）
@@ -310,14 +312,18 @@ def run_is_backtest_vectorized(df_all: pd.DataFrame,
         total = len(p)
         if total < MIN_TRADES:
             continue
-        win_rate  = float((p > 0).sum() / total * 100)
+        wins      = int((p > 0).sum())
+        win_rate  = float(wins / total * 100)
         final_pnl = float(p.sum())
         eq        = np.concatenate([[INITIAL_CAPITAL], INITIAL_CAPITAL + np.cumsum(p)])
         peak      = np.maximum.accumulate(eq)
         max_dd    = float(((eq - peak) / peak * 100).min())
+        # 二項検定：H0=勝率50%（エッジなし）、片側検定
+        p_value   = float(1 - binom.cdf(wins - 1, total, 0.5))
         results[code5] = {
             "total": total, "win_rate": win_rate,
-            "max_dd": max_dd, "final_pnl": final_pnl, "trades": [],
+            "max_dd": max_dd, "final_pnl": final_pnl,
+            "p_value": p_value, "trades": [],
         }
 
     elapsed = time.time() - t0
@@ -590,10 +596,11 @@ def main() -> None:
     for code5, res in is_results.items():
         if (res["win_rate"]  >= MIN_WIN_RATE and
             res["max_dd"]    >= MAX_DD and
-            res["final_pnl"] >= MIN_PNL):
+            res["final_pnl"] >= MIN_PNL and
+            res.get("p_value", 1.0) <= P_VALUE_MAX):
             candidates[code5] = res
     print(f"  基準通過: {len(candidates)} 銘柄")
-    print(f"    条件: 取引{MIN_TRADES}回+ / 勝率{MIN_WIN_RATE}%+ / DD{MAX_DD}%以内 / 損益{MIN_PNL:,}円+")
+    print(f"    条件: 取引{MIN_TRADES}回+ / 勝率{MIN_WIN_RATE}%+ / DD{MAX_DD}%以内 / 損益{MIN_PNL:,}円+ / p値{P_VALUE_MAX}以下")
 
     if len(candidates) < TARGET_N:
         print(f"  警告: 候補が{TARGET_N}銘柄に満たない → 全候補({len(candidates)}銘柄)を使用")
@@ -664,8 +671,8 @@ def main() -> None:
 
     # 選定30銘柄リスト
     print(f"\n【選定{len(selected5)}銘柄リスト（IS期間成績順）】")
-    print(f"  {'コード':6}  {'銘柄名':16}  {'業種':16}  {'勝率':>6}  {'DD':>6}  {'損益':>10}  {'取引':>4}")
-    print("  " + "-" * 72)
+    print(f"  {'コード':6}  {'銘柄名':16}  {'業種':16}  {'勝率':>6}  {'DD':>6}  {'損益':>10}  {'取引':>4}  {'p値':>6}")
+    print("  " + "-" * 80)
     for code5 in selected5:
         r   = candidates.get(code5, is_results.get(code5, {}))
         nm  = name_map.get(code5, code5)[:14]
@@ -674,7 +681,8 @@ def main() -> None:
         dd  = r.get("max_dd", 0)
         pnl = r.get("final_pnl", 0)
         tr  = r.get("total", 0)
-        print(f"  {code5:6}  {nm:16}  {sec:16}  {wr:5.1f}%  {dd:5.1f}%  {pnl:>10,.0f}  {tr:>4}")
+        pv  = r.get("p_value", 1.0)
+        print(f"  {code5:6}  {nm:16}  {sec:16}  {wr:5.1f}%  {dd:5.1f}%  {pnl:>10,.0f}  {tr:>4}  {pv:5.3f}")
 
     # OOS成績
     print(f"\n【OOS期間パフォーマンス】")
