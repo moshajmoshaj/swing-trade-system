@@ -15,6 +15,7 @@ import sys
 import os
 sys.stdout.reconfigure(encoding="utf-8")
 
+import time
 import pandas as pd
 import pandas_ta as ta
 from datetime import datetime, timedelta
@@ -114,7 +115,7 @@ def fetch_prices(client: jquantsapi.ClientV2, codes: list[str]) -> pd.DataFrame:
     col_rename = {"O": "Open", "H": "High", "L": "Low", "C": "Close", "Vo": "Volume"}
 
     dfs = []
-    for code in codes:
+    for i, code in enumerate(codes):
         try:
             df = client.get_eq_bars_daily(
                 code=code,
@@ -123,10 +124,13 @@ def fetch_prices(client: jquantsapi.ClientV2, codes: list[str]) -> pd.DataFrame:
             )
             if df is not None and not df.empty:
                 df = df.rename(columns=col_rename)
-                df["Code"] = code  # 4桁コードで統一（APIは5桁を返すため上書き）
+                df["Code"] = code
                 dfs.append(df)
         except Exception as e:
             print(f"  警告: {code} の取得失敗 ({e})")
+        # APIレート制限対策（120req/分 → 0.52秒間隔で安全マージン確保）
+        if (i + 1) % 10 == 0:
+            time.sleep(0.5)
 
     if not dfs:
         raise ConnectionError("全銘柄の株価データ取得に失敗しました")

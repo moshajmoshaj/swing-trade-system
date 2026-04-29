@@ -186,9 +186,8 @@ def main() -> None:
 
         price = prices.get(code)
         if price is None:
-            # 当日データ未取得でも強制終了は判定（日数ベース）
-            if held_days >= FORCED_EXIT_DAYS:
-                log(f"WARN: {code} 当日価格未取得のため強制終了を翌日に延期")
+            if held_days >= forced_days:
+                log(f"WARN: [{strategy}] {code} 当日価格未取得のため強制終了を翌日に延期")
             continue
 
         high  = price["High"]
