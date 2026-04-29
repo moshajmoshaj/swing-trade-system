@@ -1,5 +1,5 @@
 # 自動売買システム設計書
-**最終更新：2026年4月29日　Version 3.0**
+**最終更新：2026年4月29日　Version 3.1**
 
 ---
 
@@ -254,7 +254,8 @@ swing-trade-system/
 ├── .env                         ← APIキー（GitHubに上げない）
 ├── .gitignore                   ← parquetファイル除外済み
 ├── requirements.txt
-├── oos_backtest.py              ✅ OOSバックテスト（ベクトル化・高速化済み）
+├── oos_backtest.py              ✅ OOSバックテスト（ベクトル化・取引コスト込み）
+├── oos_backtest_cd.py           ✅ 戦略C/D OOSバックテスト（取引コスト込み）
 ├── step3_combined.py            ✅ 戦略A+B統合バックテスト
 ├── src/
 │   ├── data_fetcher.py          ✅ J-Quants API接続・銘柄一覧取得
@@ -406,15 +407,15 @@ swing-trade-system/
 ### 目的
 実運用移行前に、リアルタイムのシグナルで3ヶ月間の模擬取引を行う。
 
-### 自動化構成（2026-04-26完成）
+### 自動化構成（2026-04-29更新）
 - 実行方式：Windowsタスクスケジューラ（毎営業日17:00自動実行）
 - 土日・祝日：`check_bizday.py` で自動スキップ
 - スマホ通知：ntfy（トピック：swing-trade-moshaj-2026）
 - 実行フロー：
-  ① `auto_exit.py`：保有銘柄の決済判定・損益記録
-  ② `scanner.py`：30銘柄シグナルスキャン
-  ③ `auto_entry.py`：RSI降順・上位5銘柄まで自動記録
-  ④ `auto_report.py`：月次集計自動更新
+  ① `auto_exit.py`：保有銘柄の決済判定（戦略別保有日数：A=10日・C=7日・D=5日）
+  ② `scanner.py`：戦略A/C/D 約202銘柄シグナルスキャン
+  ③ `auto_entry.py`：RSI降順・空き枠にエントリー記録（Strategy列に戦略種別を記録）
+  ④ `auto_report.py`：月次集計・戦略別損益を日次通知
 - ログ確認：`logs/scheduler_log.txt`
 
 ### 合格基準
@@ -441,10 +442,10 @@ swing-trade-system/
 
 | 順序 | スクリプト | 処理内容 |
 |------|-----------|---------|
-| ① | `auto_exit.py` | 保有銘柄の損切り/利確/強制終了・損益記録 |
-| ② | `scanner.py` | 当日シグナル30銘柄スキャン |
-| ③ | `auto_entry.py` | RSI降順・空き枠にエントリー記録 |
-| ④ | `auto_report.py` | 月次集計シート自動更新 |
+| ① | `auto_exit.py` | 保有銘柄の損切り/利確/強制終了（戦略別保有日数適用）・損益記録 |
+| ② | `scanner.py` | 戦略A/C/D 約202銘柄シグナルスキャン |
+| ③ | `auto_entry.py` | RSI降順・空き枠にエントリー記録（Strategy列書き込み） |
+| ④ | `auto_report.py` | 月次集計・戦略別損益を日次通知 |
 
 ---
 
@@ -476,6 +477,9 @@ swing-trade-system/
 | 9132a16 | feat: スキャナーに戦略C/D追加・設計書OOS結果を修正値に更新 |
 | 32af117 | feat: auto_entry/exit に戦略A/C/D対応追加・保有日数を戦略別に制御 |
 | 8db05a3 | feat: strategy_c/d_candidates.csvをGit管理に追加 |
+| 2ffffd0 | feat: 戦略C/D OOSバックテスト実装・全戦略コスト込み結果判明 |
+| c0ada60 | feat: final_candidates再選定(30銘柄)・auto_report戦略別集計 |
+| c120f30 | fix: auto_exit FORCED_EXIT_DAYS辞書バグ修正・scanner APIレート制限対策 |
 
 ---
 
@@ -494,4 +498,4 @@ swing-trade-system/
 ---
 
 *本ドキュメントはフェーズ完了時・重要な変更時に更新する*
-*Last Updated: 2026年4月29日　Version 3.0*
+*Last Updated: 2026年4月29日　Version 3.1*
