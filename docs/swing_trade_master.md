@@ -469,6 +469,10 @@ swing-trade-system/
 | c6526bc | feat: auto_report.pyに日次レポート通知を追加 |
 | a3e5c81 | feat: 戦略D バックテスト完了・CLAUDE.md追加 |
 | 6e35f0b | docs: 開発哲学Section 0追加・Version 3.0・VSCodeタスク追加 |
+| 988841c | docs: 戦略C/D多角的検証追加・状態更新・フッターVersion 3.0統一 |
+| e8fa271 | feat: 取引コスト（手数料0.055%+スリッページ0.05%）をバックテストに追加 |
+| 87a2634 | fix: Codeバグ修正・ATR_TP_MULT=4・ADX=15に確定設定統一 |
+| 9132a16 | feat: スキャナーに戦略C/D追加・設計書OOS結果を修正値に更新 |
 
 ---
 

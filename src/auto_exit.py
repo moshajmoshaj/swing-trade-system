@@ -24,8 +24,9 @@ TRADE_LOG    = "logs/paper_trade_log.xlsx"
 SCHED_LOG    = "logs/scheduler_log.txt"
 MONTHLY_STOP = "logs/monthly_stop.txt"
 
-FORCED_EXIT_DAYS = 10   # 設計書準拠（10営業日）
 MAX_PER_STOCK    = 200_000
+# 戦略別保有上限営業日（設計書準拠）
+FORCED_EXIT_DAYS = {"A": 10, "C": 7, "D": 5}
 
 
 def log(msg: str) -> None:
@@ -141,6 +142,8 @@ def main() -> None:
         elif isinstance(entry_date, str):
             entry_date = date.fromisoformat(entry_date[:10])
 
+        strategy_val = row[13].value if len(row) > 13 else None
+        strategy     = str(strategy_val).strip() if strategy_val else "A"
         holdings.append({
             "row_idx":     row[0].row,
             "code":        str(row[1].value).strip(),
@@ -148,6 +151,7 @@ def main() -> None:
             "entry_price": float(row[2].value),
             "stop_loss":   float(row[3].value),
             "take_profit": float(row[4].value),
+            "strategy":    strategy,
         })
 
     if not holdings:
@@ -174,6 +178,8 @@ def main() -> None:
         stop_loss    = h["stop_loss"]
         take_profit  = h["take_profit"]
         row_idx      = h["row_idx"]
+        strategy     = h.get("strategy", "A")
+        forced_days  = FORCED_EXIT_DAYS.get(strategy, 10)
 
         # 保有日数
         held_days = business_days_held(entry_date, today)
@@ -199,13 +205,13 @@ def main() -> None:
         elif high >= take_profit:
             exit_price = take_profit
             reason     = "利確"
-        elif held_days >= FORCED_EXIT_DAYS:
+        elif held_days >= forced_days:
             exit_price = close
             reason     = "強制終了"
 
         if reason is None:
-            log(f"HOLD: {code} 保有{held_days}日目  H={high:,.0f}  L={low:,.0f}  "
-                f"SL={stop_loss:,.0f}  TP={take_profit:,.0f}")
+            log(f"HOLD: [{strategy}] {code} 保有{held_days}/{forced_days}日  "
+                f"H={high:,.0f}  L={low:,.0f}  SL={stop_loss:,.0f}  TP={take_profit:,.0f}")
             continue
 
         # PnL 計算（200,000円配分ベース）
@@ -220,7 +226,7 @@ def main() -> None:
         ws_trade.cell(row=row_idx, column=12, value=round(pnl_rate, 6))
         ws_trade.cell(row=row_idx, column=13, value=reason)
 
-        log(f"EXIT: {code}  理由={reason}  "
+        log(f"EXIT: [{strategy}] {code}  理由={reason}  "
             f"決済={exit_price:,.0f}  損益={pnl_yen:+,.0f}円 ({pnl_rate:+.2%})  "
             f"保有{held_days}日")
         exits_info.append((code, pnl_yen, reason))

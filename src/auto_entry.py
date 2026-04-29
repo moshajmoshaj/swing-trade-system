@@ -127,6 +127,7 @@ def main() -> None:
             break
 
         code        = str(sig["Code"]).zfill(4)
+        strategy    = str(sig.get("Strategy", "A")).strip()
         entry_price = float(sig["Close"])
         stop_loss   = float(sig["StopLoss"])
         take_profit = float(sig["TakeProfit"])
@@ -156,13 +157,15 @@ def main() -> None:
         ws_trade.cell(row=next_row, column=11, value=None)
         ws_trade.cell(row=next_row, column=12, value=None)
         ws_trade.cell(row=next_row, column=13, value="保有中")
+        ws_trade.cell(row=next_row, column=14, value=strategy)
 
+        hold_limit = {"A": 10, "C": 7, "D": 5}.get(strategy, 10)
         shares = max(1, int(max_stk // entry_price))
-        log(f"ENTRY: {code} @ {entry_price:,.0f}円  株数={shares}  "
+        log(f"ENTRY: [{strategy}] {code} @ {entry_price:,.0f}円  株数={shares}  "
             f"SL={stop_loss:,.0f}  TP={take_profit:,.0f}  "
-            f"RSI={rsi:.1f}  ADX={adx:.1f}")
+            f"RSI={rsi:.1f}  保有上限={hold_limit}日")
 
-        entries_info.append((code, rsi))
+        entries_info.append((code, rsi, strategy))
         held_codes.add(code)
         next_row += 1
         entered  += 1
@@ -173,9 +176,9 @@ def main() -> None:
     # Gmail 通知（エントリー結果サマリー）
     total_held = len(holdings) + entered
     body_lines = [f"新規：{entered}件"]
-    for code, rsi in entries_info:
+    for code, rsi, strat in entries_info:
         rsi_str = f"{rsi:.1f}" if rsi is not None else "N/A"
-        body_lines.append(f"　{code} RSI {rsi_str}")
+        body_lines.append(f"　[{strat}] {code} RSI {rsi_str}")
     body_lines.append(f"保有中：{total_held}銘柄")
     send_notify("【ST】エントリー記録完了", "\n".join(body_lines))
 
