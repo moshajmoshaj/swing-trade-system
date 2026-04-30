@@ -131,7 +131,7 @@ def main() -> None:
     # 戦略別損益集計
     strat_lines = []
     if not df.empty and "戦略" in df.columns:
-        for st in ["A", "C", "D"]:
+        for st in ["A", "C", "D", "E"]:
             sub = df[df["戦略"] == st]
             if not sub.empty:
                 st_pnl = sub["損益円"].sum()
