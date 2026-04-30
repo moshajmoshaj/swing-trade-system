@@ -159,7 +159,7 @@ def main() -> None:
         ws_trade.cell(row=next_row, column=13, value="保有中")
         ws_trade.cell(row=next_row, column=14, value=strategy)
 
-        hold_limit = {"A": 10, "C": 7, "D": 5}.get(strategy, 10)
+        hold_limit = {"A": 10, "C": 7, "D": 5, "E": 10}.get(strategy, 10)
         shares = max(1, int(max_stk // entry_price))
         log(f"ENTRY: [{strategy}] {code} @ {entry_price:,.0f}円  株数={shares}  "
             f"SL={stop_loss:,.0f}  TP={take_profit:,.0f}  "

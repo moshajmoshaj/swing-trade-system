@@ -25,6 +25,7 @@ import jquantsapi
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))
 from notifier import send_notify, send_error_notify, call_with_retry
+from market_regime import get_regime, REGIME_LABEL
 
 load_dotenv()
 
@@ -459,6 +460,23 @@ def main():
 
     client = call_with_retry(get_client)
 
+    # 市場レジーム判定
+    print("\n市場レジーム判定中（TOPIX連動ETF 1306）...")
+    try:
+        regime, regime_info = get_regime(client)
+        active = regime_info["active_strategies"]
+        log(f"INFO: 市場レジーム={regime}  TOPIX={regime_info['topix']}  "
+            f"SMA50={regime_info['sma50']}  SMA200={regime_info['sma200']}")
+        log(f"INFO: 有効戦略={active if active else '全停止(BEAR)'}")
+        print(f"  レジーム : {REGIME_LABEL.get(regime, regime)}")
+        print(f"  TOPIX    : {regime_info['topix']}  SMA50={regime_info['sma50']}  SMA200={regime_info['sma200']}")
+        print(f"  有効戦略 : {', '.join(active) if active else '全停止（BEARレジーム）'}")
+    except Exception as e:
+        log(f"WARN: レジーム判定失敗 ({e}) → 全戦略有効(フォールバック)")
+        regime = "BULL"
+        active = ["A", "C", "D", "E"]
+        regime_info = {"topix": "N/A", "sma50": "N/A", "sma200": "N/A", "active_strategies": active}
+
     # 各戦略の候補銘柄を読み込み（重複排除して一括取得）
     codes_a = load_candidates(CANDIDATES_CSV)
     codes_c = load_candidates(CANDIDATES_C_CSV) if os.path.exists(CANDIDATES_C_CSV) else []
@@ -481,16 +499,30 @@ def main():
     df_e = run_scan(all_df, codes_e, {},            strategy="E")
 
     result_df = pd.concat([df_a, df_c, df_d, df_e], ignore_index=True)
+
+    # レジームフィルター: 非アクティブ戦略のシグナルを抑制
+    if not result_df.empty:
+        if active:
+            suppressed = result_df["Signal"] & ~result_df["Strategy"].isin(active)
+        else:
+            suppressed = result_df["Signal"].copy()
+        n_suppressed = suppressed.sum()
+        if n_suppressed > 0:
+            result_df.loc[suppressed, "Signal"] = False
+            result_df.loc[suppressed, "FailedConds"] = f"レジーム:{regime}停止"
+            log(f"INFO: レジームフィルター適用 {n_suppressed}件抑制 → 有効戦略={active}")
+
     display_and_save(result_df)
 
     print("\n完了。シグナル銘柄をpaper_trade_log.xlsxに記録してください。")
     log("scanner.py 完了")
 
     signals = result_df[result_df["Signal"] == True] if not result_df.empty else pd.DataFrame()
+    regime_line = f"レジーム: {regime}（{', '.join(active) if active else '全停止'}）"
     if signals.empty:
-        notify_body = "本日のシグナルなし"
+        notify_body = f"{regime_line}\n本日のシグナルなし"
     else:
-        lines = [f"シグナル：{len(signals)}件"]
+        lines = [regime_line, f"シグナル：{len(signals)}件"]
         for _, row in signals.iterrows():
             lines.append(f"  [{row['Strategy']}] {row['Code']}  RSI={row['RSI14']}")
         notify_body = "\n".join(lines)
