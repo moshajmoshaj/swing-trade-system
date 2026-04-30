@@ -56,12 +56,14 @@ VOL_MA_PERIOD    = 20
 VOL_SURGE_RATIO  = 1.2
 GAP_DOWN_THRESH  = -0.015  # -1.5%
 EARNINGS_WINDOW  = 3       # 決算前後営業日
+ATR_A_TP         = 6.0     # OOSバックテスト確定値（TP×6でOOS+4.51%）
+ATR_A_SL         = 2.0
 
 # 戦略Cパラメータ（平均回帰・逆張り）
 RSI_C_MIN        = 30
 RSI_C_MAX        = 40
 VOL_C_RATIO      = 1.5
-ATR_C_TP         = 1.5
+ATR_C_TP         = 2.5     # OOSバックテスト確定値（TP×2.5でOOS+4.40%）
 ATR_C_SL         = 1.5
 MAX_HOLD_C       = 7
 
@@ -69,7 +71,7 @@ MAX_HOLD_C       = 7
 GAP_D_MIN        = 0.03    # +3%以上
 VOL_D_RATIO      = 1.5
 RSI_D_MIN        = 50
-ATR_D_TP         = 3.0
+ATR_D_TP         = 4.5     # OOSバックテスト確定値（TP×4.5でOOS+0.55%）
 ATR_D_SL         = 1.5
 MAX_HOLD_D       = 5
 
@@ -273,7 +275,12 @@ def check_signal_c(df: pd.DataFrame) -> tuple[bool, list[str]]:
 
     atr   = row["ATR14"] if pd.notna(row["ATR14"]) else None
     stop  = round(row["Close"] - atr * ATR_C_SL, 1) if atr else None
-    tp    = round(row["Close"] + atr * ATR_C_TP, 1) if atr else None
+    # 利確：SMA20への回帰を目標（逆張りの本質）。SMA20が現値以下の稀なケースはATRフォールバック
+    sma20 = row["SMA20"] if pd.notna(row["SMA20"]) else None
+    if sma20 and sma20 > row["Close"]:
+        tp = round(sma20, 1)
+    else:
+        tp = round(row["Close"] + atr * ATR_C_TP, 1) if atr else None
     return len(failed) == 0, failed, stop, tp
 
 
@@ -377,8 +384,8 @@ def run_scan(all_df: pd.DataFrame, codes: list[str], earnings_map: dict,
             earnings_dates = earnings_map.get(code, [])
             signal, failed = check_signal(latest, today, earnings_dates)
             atr = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
-            stop_loss   = round(latest["Close"] - atr * 2, 1) if atr else None
-            take_profit = round(latest["Close"] + atr * 4, 1) if atr else None
+            stop_loss   = round(latest["Close"] - atr * ATR_A_SL, 1) if atr else None
+            take_profit = round(latest["Close"] + atr * ATR_A_TP, 1) if atr else None
         elif strategy == "C":
             signal, failed, stop_loss, take_profit = check_signal_c(df)
             atr = latest["ATR14"] if pd.notna(latest["ATR14"]) else None

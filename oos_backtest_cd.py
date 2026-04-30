@@ -43,6 +43,12 @@ COST_PER_LEG    = COMMISSION_RATE + SLIPPAGE_RATE
 # ── 戦略別パラメータ ─────────────────────────────────────────
 P_VALUE_MAX = 0.10  # 二項検定p値上限（IS過適合対策）
 
+# 特定銘柄の除外（OOS結果を歪める可能性のある異常銘柄）
+# ※コードは parquet 内の5桁形式（Code4 + "0"）
+EXCLUDE_CODES: dict[str, set] = {
+    "D": {"25930"},  # 伊藤園優先株: IS期間54回取引で突出した+286k円。単一銘柄依存の歪み確認のため除外
+}
+
 PARAMS = {
     "C": dict(atr_tp=2.5, atr_sl=1.5, max_hold=7,
               min_trades=5, min_win_rate=40.0, max_dd=-5.0, min_pnl=10_000, target_n=35),
@@ -295,6 +301,14 @@ def run_strategy(strategy: str, df_all: pd.DataFrame, name_map: dict, sector_map
                   and r.get("p_value", 1.0)  <= P_VALUE_MAX}
     print(f"  基準通過: {len(candidates)} 銘柄（p値{P_VALUE_MAX}以下フィルター適用）")
 
+    if strategy in EXCLUDE_CODES:
+        before = len(candidates)
+        for ex in EXCLUDE_CODES[strategy]:
+            candidates.pop(ex, None)
+        removed = before - len(candidates)
+        if removed:
+            print(f"  除外コード適用: {before} → {len(candidates)} 銘柄 （{EXCLUDE_CODES[strategy]} を除外）")
+
     scored = sorted(candidates.items(),
                     key=lambda x: x[1]["win_rate"] * (1 - abs(x[1]["max_dd"]) / 100),
                     reverse=True)
@@ -345,10 +359,21 @@ def run_strategy(strategy: str, df_all: pd.DataFrame, name_map: dict, sector_map
 
 
 def main() -> None:
+    import sys as _sys
+    # 引数で戦略を絞れる: python oos_backtest_cd.py D   → 戦略Dのみ実行
+    target_strategies = [s.upper() for s in _sys.argv[1:] if s.upper() in ("C", "D", "E")]
+    if not target_strategies:
+        target_strategies = ["C", "D", "E"]
+
     print("=" * 68)
-    print("  戦略C/D OOSバックテスト（取引コスト込み）")
+    print("  戦略C/D/E OOSバックテスト（取引コスト込み）")
     print(f"  IS: {IS_START.date()} ～ {IS_END.date()}")
     print(f"  OOS: {OOS_START.date()} ～ {OOS_END.date()}")
+    print(f"  実行戦略: {', '.join(target_strategies)}")
+    if any(s in EXCLUDE_CODES for s in target_strategies):
+        for s, ex in EXCLUDE_CODES.items():
+            if s in target_strategies:
+                print(f"  ⚠ 戦略{s} 除外コード: {ex}")
     print("=" * 68)
 
     print("\nデータ読み込み中...")
@@ -365,9 +390,8 @@ def main() -> None:
     name_map   = dict(zip(master["Code"], master["CoName"]))
     sector_map = dict(zip(master["Code"], master["S33Nm"]))
 
-    run_strategy("C", df_all, name_map, sector_map)
-    run_strategy("D", df_all, name_map, sector_map)
-    run_strategy("E", df_all, name_map, sector_map)
+    for s in target_strategies:
+        run_strategy(s, df_all, name_map, sector_map)
 
 
 if __name__ == "__main__":
