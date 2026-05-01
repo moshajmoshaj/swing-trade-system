@@ -329,7 +329,7 @@ swing-trade-system/
 │   ├── scanner.py               ✅ 戦略A/C/D/E 4戦略シグナルスキャン＋レジームフィルター
 │   ├── auto_entry.py            ✅ シグナル銘柄の自動エントリー記録（戦略別対応）
 │   ├── auto_exit.py             ✅ 決済条件自動判定（戦略別保有日数：A=10・C=7・D=5・E=10）
-│   ├── auto_report.py           ✅ 月次集計・戦略別損益日次通知
+│   ├── auto_report.py           ✅ 月次集計・戦略別損益日次通知・PDCA自動記録
 │   ├── notifier.py              ✅ ntfyスマホ通知
 │   ├── check_bizday.py          ✅ 土日・祝日判定
 │   ├── get_ts.py                ✅ タイムスタンプ取得ヘルパー
@@ -542,7 +542,7 @@ swing-trade-system/
 | ① | `auto_exit.py` | 保有銘柄の損切り/利確/強制終了（戦略別保有日数適用）・損益記録 |
 | ② | `scanner.py` | 戦略A/C/D/E 約230銘柄シグナルスキャン |
 | ③ | `auto_entry.py` | RSI降順・空き枠にエントリー記録（Strategy列書き込み） |
-| ④ | `auto_report.py` | 月次集計・戦略別損益を日次通知 |
+| ④ | `auto_report.py` | 月次集計・戦略別損益を日次通知・PDCA衝動を自動検出してlogs/pdca_log.txtに記録・通知に追記 |
 
 ---
 

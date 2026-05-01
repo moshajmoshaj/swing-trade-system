@@ -18,6 +18,7 @@ from notifier import send_notify, send_error_notify
 _SCRIPT   = "auto_report.py"
 TRADE_LOG = "logs/paper_trade_log.xlsx"
 SCHED_LOG = "logs/scheduler_log.txt"
+PDCA_LOG  = "logs/pdca_log.txt"
 
 
 def log(msg: str) -> None:
@@ -30,6 +31,72 @@ def log(msg: str) -> None:
             f.write(line + "\n")
     except PermissionError:
         pass
+
+
+def detect_pdca_impulses(df: pd.DataFrame) -> list[str]:
+    """今日の取引・シグナル状況から『変えたくなった衝動』を自動検出する"""
+    today = datetime.now().date()
+    entries = []
+
+    # ── 損切り検出 ──────────────────────────────────────
+    if not df.empty:
+        today_df  = df[df["決済日"].dt.date == today]
+        stops     = today_df[today_df["決済理由"].str.contains("損切り", na=False)]
+        n_stops   = len(stops)
+        if n_stops >= 2:
+            codes = ", ".join(
+                f"[{r['戦略']}]{r['銘柄コード']}" for _, r in stops.iterrows()
+            )
+            entries.append(
+                f"[{today}] 同日{n_stops}件損切り（{codes}）"
+                f"→ 同一相場環境での順張り集中リスクを実感。"
+                f"同日エントリー上限を1件に絞りたくなるがOOS前提を壊すため Phase4凍結中・保留"
+            )
+        elif n_stops == 1:
+            row     = stops.iloc[0]
+            pct_str = (
+                f"{float(row['損益率'])*100:+.1f}%"
+                if pd.notna(row.get("損益率")) else ""
+            )
+            entries.append(
+                f"[{today}] [{row['戦略']}]{row['銘柄コード']} 損切り{pct_str}"
+                f" → ATR×2のSL幅を広げたくなるがOOS検証済みパラメータのため Phase4凍結中・保留"
+            )
+
+    # ── シグナルゼロ連続チェック ────────────────────────
+    scanner_csv = Path("logs/scanner_log.csv")
+    if scanner_csv.exists():
+        try:
+            sl_df       = pd.read_csv(scanner_csv, parse_dates=["Date"])
+            last_dates  = sl_df["Date"].drop_duplicates().nlargest(7)
+            recent      = sl_df[sl_df["Date"].isin(last_dates)]
+            daily_sig   = recent.groupby("Date")["Signal"].any().sort_index()
+            zero_streak = 0
+            for has_sig in reversed(daily_sig.values.tolist()):
+                if not has_sig:
+                    zero_streak += 1
+                else:
+                    break
+            if zero_streak >= 3:
+                entries.append(
+                    f"[{today}] シグナルゼロ{zero_streak}営業日連続"
+                    f" → RSIレンジかADX閾値を緩めたくなるがOOS検証済みのため Phase4凍結中・保留"
+                )
+        except Exception:
+            pass
+
+    return entries
+
+
+def append_pdca_log(entries: list[str]) -> None:
+    if not entries:
+        return
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    os.makedirs("logs", exist_ok=True)
+    with open(PDCA_LOG, "a", encoding="utf-8") as f:
+        f.write(f"\n## {today_str}（自動記録）\n")
+        for e in entries:
+            f.write(e + "\n")
 
 
 def read_config(wb) -> dict:
@@ -123,11 +190,12 @@ def main() -> None:
     )
 
     # 日次レポート（完了取引ゼロでも常に送信）
-    total_pnl   = float(df["損益円"].sum()) if not df.empty else 0.0
-    current     = capital + total_pnl
-    target_pnl  = capital * 0.02
+    total_pnl    = float(df["損益円"].sum()) if not df.empty else 0.0
+    current      = capital + total_pnl
+    target_pnl   = capital * 0.02
     target_asset = capital + target_pnl
-    achievement = (total_pnl / target_pnl * 100) if target_pnl != 0 else 0.0
+    achievement  = (total_pnl / target_pnl * 100) if target_pnl != 0 else 0.0
+
     # 戦略別損益集計
     strat_lines = []
     if not df.empty and "戦略" in df.columns:
@@ -138,7 +206,15 @@ def main() -> None:
                 st_wr  = (sub["損益円"] > 0).mean() * 100
                 strat_lines.append(f"  [{st}] {len(sub)}件 WR{st_wr:.0f}% {st_pnl:+,.0f}円")
 
-    daily_body  = (
+    # PDCA自動検出
+    pdca_entries = detect_pdca_impulses(df)
+    append_pdca_log(pdca_entries)
+    if pdca_entries:
+        log(f"INFO: PDCA自動記録 {len(pdca_entries)}件 → {PDCA_LOG}")
+
+    # 通知本文
+    pdca_lines = [f"・{e.split('→')[0].strip()}" for e in pdca_entries]
+    daily_body = (
         f"保有中：{holding_count}銘柄\n"
         f"初期資金：{capital:,.0f}円\n"
         f"累計確定損益：{total_pnl:+,.0f}円\n"
@@ -146,6 +222,7 @@ def main() -> None:
         f"目標（年利8%・3ヶ月）：{target_asset:,.0f}円\n"
         f"達成率：{achievement:.0f}%"
         + ("\n戦略別:\n" + "\n".join(strat_lines) if strat_lines else "")
+        + ("\n\n📝 PDCA:\n" + "\n".join(pdca_lines) if pdca_lines else "")
     )
     send_notify("【ST】日次レポート", daily_body)
     log(f"INFO: 日次レポート送信  累計損益 {total_pnl:+,.0f}円  達成率 {achievement:.0f}%")
