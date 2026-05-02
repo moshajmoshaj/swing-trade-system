@@ -27,7 +27,7 @@ MONTHLY_STOP = "logs/monthly_stop.txt"
 MAX_PER_STOCK    = 200_000
 LIVE_TRADING     = os.getenv("LIVE_TRADING", "false").lower() == "true"
 # 戦略別保有上限営業日（設計書準拠）
-FORCED_EXIT_DAYS = {"A": 10, "C": 7, "D": 5, "E": 10}
+FORCED_EXIT_DAYS = {"A": 10, "C": 7, "D": 5, "E": 10, "F": 15}
 
 
 def log(msg: str) -> None:

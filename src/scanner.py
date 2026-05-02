@@ -37,6 +37,7 @@ CANDIDATES_CSV   = "logs/final_candidates.csv"          # 戦略A: 30銘柄
 CANDIDATES_C_CSV = "logs/strategy_c_candidates.csv"     # 戦略C: 35銘柄
 CANDIDATES_D_CSV = "logs/strategy_d_candidates.csv"     # 戦略D: 144銘柄
 CANDIDATES_E_CSV = "logs/strategy_e_candidates.csv"     # 戦略E: 30銘柄
+FINS_SUMMARY_PATH = "data/raw/fins_summary.parquet"     # 戦略F: 財務サマリーキャッシュ
 SCANNER_LOG_CSV  = "logs/scanner_log.csv"               # スキャン履歴
 SCHED_LOG        = "logs/scheduler_log.txt"             # スケジューラーログ
 DAYS_TO_FETCH    = 250                                  # 指標計算に必要な日数（SMA200対応）
@@ -82,6 +83,16 @@ VOL_E_RATIO      = 1.2
 ATR_E_TP         = 6.0
 ATR_E_SL         = 2.0
 MAX_HOLD_E       = 10
+
+# 戦略Fパラメータ（決算モメンタム・PEAD）
+RSI_F_MIN        = 45
+RSI_F_MAX        = 70
+VOL_F_RATIO      = 1.2
+ATR_F_TP         = 5.0
+ATR_F_SL         = 2.0
+MAX_HOLD_F       = 15
+EPS_GROWTH_MIN   = 0.20   # EPS成長率 20%以上
+F_WINDOW_DAYS    = 7      # 決算開示後の有効日数
 
 
 def log(msg: str) -> None:
@@ -361,6 +372,102 @@ def check_signal_e(df: pd.DataFrame) -> tuple[bool, list[str], float, float]:
 
 
 # ──────────────────────────────────────────
+# 戦略F：決算モメンタム（PEAD）関連
+# ──────────────────────────────────────────
+def load_fins_cache() -> pd.DataFrame:
+    """fins_summary.parquet を読み込んで通期決算行を返す。なければ空DataFrame。"""
+    path = Path(FINS_SUMMARY_PATH)
+    if not path.exists():
+        log(f"WARN: {FINS_SUMMARY_PATH} なし → 戦略Fスキップ")
+        return pd.DataFrame()
+    try:
+        df = pd.read_parquet(path)
+        df["DiscDate"] = pd.to_datetime(df["DiscDate"], errors="coerce")
+        df["EPS"]      = pd.to_numeric(df["EPS"], errors="coerce")
+        return df[df["CurPerType"] == "FY"].copy()
+    except Exception as e:
+        log(f"WARN: fins_summary読込エラー ({e}) → 戦略Fスキップ")
+        return pd.DataFrame()
+
+
+def get_f_qualifying_codes(client: jquantsapi.ClientV2,
+                            today: datetime,
+                            fins_cache: pd.DataFrame) -> set[str]:
+    """
+    本日〜F_WINDOW_DAYS前の通期決算開示でEPS成長20%以上の銘柄コードを返す。
+    J-Quants APIで当日分を取得し、parquetで前期EPSと比較する。
+    """
+    if fins_cache.empty:
+        return set()
+
+    qualifying: set[str] = set()
+    # 直近F_WINDOW_DAYS日分の開示を確認
+    for delta in range(F_WINDOW_DAYS):
+        check_date = today - timedelta(days=delta)
+        if check_date.weekday() >= 5:   # 土日はスキップ
+            continue
+        date_str = check_date.strftime("%Y%m%d")
+        try:
+            disc_df = client.get_fin_summary(date_yyyymmdd=date_str)
+        except Exception:
+            continue
+        if disc_df is None or disc_df.empty:
+            continue
+
+        # 通期のみ
+        if "CurPerType" in disc_df.columns:
+            disc_df = disc_df[disc_df["CurPerType"] == "FY"]
+        if disc_df.empty:
+            continue
+
+        disc_df["EPS"] = pd.to_numeric(disc_df.get("EPS", pd.Series(dtype=float)),
+                                        errors="coerce")
+        disc_df["Code"] = disc_df["Code"].astype(str).str.strip()
+
+        for _, row in disc_df.iterrows():
+            code    = row["Code"]
+            eps_now = row.get("EPS")
+            if pd.isna(eps_now) or eps_now <= 0:
+                continue
+            # キャッシュから前期EPS取得
+            hist = fins_cache[fins_cache["Code"] == code].sort_values("DiscDate")
+            hist = hist[hist["DiscDate"] < check_date]
+            if hist.empty:
+                continue
+            eps_prev = hist.iloc[-1]["EPS"]
+            if pd.isna(eps_prev) or eps_prev <= 0:
+                continue
+            if (eps_now - eps_prev) / eps_prev >= EPS_GROWTH_MIN:
+                qualifying.add(code)
+
+    log(f"INFO: 戦略F対象（EPS成長{EPS_GROWTH_MIN*100:.0f}%超・{F_WINDOW_DAYS}日以内）: {len(qualifying)}銘柄")
+    return qualifying
+
+
+def check_signal_f(df: pd.DataFrame) -> tuple[bool, list[str], float | None, float | None]:
+    """戦略F：決算モメンタム テクニカル確認（決算イベント判定は呼び出し元で実施済み）"""
+    if len(df) < 210:
+        return False, ["データ不足"], None, None
+
+    row    = df.iloc[-1]
+    failed = []
+
+    if not (pd.notna(row["SMA200"]) and row["Close"] > row["SMA200"]):
+        failed.append("SMA200")
+    if not (pd.notna(row["RSI14"]) and RSI_F_MIN <= row["RSI14"] <= RSI_F_MAX):
+        failed.append(f"RSI({row['RSI14']:.1f})" if pd.notna(row["RSI14"]) else "RSI(NaN)")
+    if not (pd.notna(row["VOL_MA20"]) and row["Volume"] >= row["VOL_MA20"] * VOL_F_RATIO):
+        failed.append("出来高")
+    if not (row["Close"] > row["Open"]):
+        failed.append("陰線")
+
+    atr  = row["ATR14"] if pd.notna(row["ATR14"]) else None
+    stop = round(row["Close"] - atr * ATR_F_SL, 1) if atr else None
+    tp   = round(row["Close"] + atr * ATR_F_TP, 1) if atr else None
+    return len(failed) == 0, failed, stop, tp
+
+
+# ──────────────────────────────────────────
 # スキャン実行
 # ──────────────────────────────────────────
 def run_scan(all_df: pd.DataFrame, codes: list[str], earnings_map: dict,
@@ -394,6 +501,9 @@ def run_scan(all_df: pd.DataFrame, codes: list[str], earnings_map: dict,
             atr = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
         elif strategy == "E":
             signal, failed, stop_loss, take_profit = check_signal_e(df)
+            atr = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
+        elif strategy == "F":
+            signal, failed, stop_loss, take_profit = check_signal_f(df)
             atr = latest["ATR14"] if pd.notna(latest["ATR14"]) else None
         else:
             continue
@@ -435,7 +545,7 @@ def display_and_save(result_df: pd.DataFrame) -> None:
     else:
         print(f"  {'戦略':<4} {'コード':<6} {'終値':>7} {'RSI':>6} {'損切り':>8} {'利確':>8} {'保有上限':>6}")
         print(f"  {'-'*4} {'-'*6} {'-'*7} {'-'*6} {'-'*8} {'-'*8} {'-'*6}")
-        hold_map = {"A": "10日", "C": "7日", "D": "5日", "E": "10日"}
+        hold_map = {"A": "10日", "C": "7日", "D": "5日", "E": "10日", "F": "15日"}
         for _, row in signals.iterrows():
             sl  = f"{row['StopLoss']:>8,.0f}" if pd.notna(row["StopLoss"]) else "     ---"
             tp  = f"{row['TakeProfit']:>8,.0f}" if pd.notna(row["TakeProfit"]) else "     ---"
@@ -497,15 +607,32 @@ def main():
     print("決算日データ取得中...")
     earnings_map = fetch_earnings_dates(client, codes_a)
 
+    # 戦略F: 決算モメンタム対象銘柄を取得
+    print("戦略F（決算モメンタム）対象銘柄確認中...")
+    fins_cache  = load_fins_cache()
+    today_dt    = datetime.today()
+    f_codes_set = get_f_qualifying_codes(client, today_dt, fins_cache)
+    # 既取得外の銘柄を追加取得
+    new_f_codes = [c for c in f_codes_set if c not in set(all_codes)]
+    if new_f_codes:
+        log(f"INFO: 戦略F追加取得 {len(new_f_codes)}銘柄")
+        df_extra = fetch_prices(client, new_f_codes)
+        all_df_f = pd.concat([all_df, df_extra], ignore_index=True)
+    else:
+        all_df_f = all_df
+    codes_f = list(f_codes_set)
+    print(f"  戦略F対象: {len(codes_f)}銘柄")
+
     today = all_df["Date"].max()
     print(f"\nスキャン基準日: {today.strftime('%Y-%m-%d (%a)')}")
 
-    df_a = run_scan(all_df, codes_a, earnings_map, strategy="A")
-    df_c = run_scan(all_df, codes_c, {},            strategy="C")
-    df_d = run_scan(all_df, codes_d, {},            strategy="D")
-    df_e = run_scan(all_df, codes_e, {},            strategy="E")
+    df_a = run_scan(all_df,   codes_a, earnings_map, strategy="A")
+    df_c = run_scan(all_df,   codes_c, {},            strategy="C")
+    df_d = run_scan(all_df,   codes_d, {},            strategy="D")
+    df_e = run_scan(all_df,   codes_e, {},            strategy="E")
+    df_f = run_scan(all_df_f, codes_f, {},            strategy="F") if codes_f else pd.DataFrame()
 
-    result_df = pd.concat([df_a, df_c, df_d, df_e], ignore_index=True)
+    result_df = pd.concat([df_a, df_c, df_d, df_e, df_f], ignore_index=True)
 
     # レジームフィルター: 非アクティブ戦略のシグナルを抑制
     if not result_df.empty:
