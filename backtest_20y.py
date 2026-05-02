@@ -139,6 +139,9 @@ def run_portfolio(stock_data: dict, start: str, end: str,
                 continue
             pos["hold_days"] += 1
             hi, lo, cl = row["High"], row["Low"], row["Close"]
+            # NaNを含む場合はスキップ（20年データの欠損対策）
+            if pd.isna(hi) or pd.isna(lo) or pd.isna(cl):
+                continue
             reason = None
             exit_p = None
             if lo <= pos["sl"]:
@@ -198,12 +201,17 @@ def run_portfolio(stock_data: dict, start: str, end: str,
         return {"trades": 0, "wins": 0, "cagr": 0.0, "max_dd": 0.0, "pnl": 0.0}
 
     # ── メトリクス計算 ──
-    eq = np.array(equity)
+    eq = np.array(equity, dtype=float)
     years = (t_end - t_start).days / 365.25
-    cagr  = ((capital / INITIAL_CAPITAL) ** (1 / years) - 1) * 100 if years > 0 else 0.0
+    try:
+        ratio = capital / INITIAL_CAPITAL
+        cagr  = ((ratio) ** (1 / years) - 1) * 100 if years > 0 and ratio > 0 else float("nan")
+    except Exception:
+        cagr = float("nan")
     peak  = np.maximum.accumulate(eq)
-    dd    = (eq - peak) / peak
-    max_dd = float(dd.min()) * 100
+    with np.errstate(invalid="ignore", divide="ignore"):
+        dd = np.where(peak > 0, (eq - peak) / peak, 0.0)
+    max_dd = float(np.nanmin(dd)) * 100
     wins  = sum(1 for t in trades if t["win"])
     pnl   = sum(t["pnl"] for t in trades)
 
