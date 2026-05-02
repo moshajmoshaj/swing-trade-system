@@ -35,6 +35,18 @@ if !BIZDAY_EXIT! neq 0 (
     goto :end
 )
 
+rem --- Phase 5: kabu API 起動確認（LIVE_TRADING=true の場合のみ） ---
+for /f "tokens=2 delims==" %%A in ('findstr /i "^LIVE_TRADING" "%PROJECT_DIR%\.env" 2^>nul') do set LIVE_TRADING=%%A
+set LIVE_TRADING=!LIVE_TRADING: =!
+if /i "!LIVE_TRADING!"=="true" (
+    %VENV_PYTHON% -c "import requests; r=requests.get('http://localhost:18080/kabusapi/token', timeout=3); exit(0)" 2>nul
+    if !errorlevel! neq 0 (
+        echo [WARN] kabuステーション が起動していないか API に接続できません
+        echo [WARN] LIVE_TRADING=true ですが実注文は発行されません
+        %VENV_PYTHON% -c "from src.notifier import send_error_notify; send_error_notify('run_scanner.bat','kabuAPI未起動','kabuステーション(R)を起動してください')" 2>nul
+    )
+)
+
 rem === 1. auto_exit.py - 保有中銘柄の決済判定 ===
 %VENV_PYTHON% "%AUTO_EXIT%"
 
