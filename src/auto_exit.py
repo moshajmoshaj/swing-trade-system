@@ -25,6 +25,7 @@ SCHED_LOG    = "logs/scheduler_log.txt"
 MONTHLY_STOP = "logs/monthly_stop.txt"
 
 MAX_PER_STOCK    = 200_000
+LIVE_TRADING     = os.getenv("LIVE_TRADING", "false").lower() == "true"
 # 戦略別保有上限営業日（設計書準拠）
 FORCED_EXIT_DAYS = {"A": 10, "C": 7, "D": 5, "E": 10}
 
@@ -115,8 +116,23 @@ def calc_monthly_pnl(ws_trade, today_ym: str) -> float:
     return total
 
 
+def _place_live_sell(code4_or_5: str, shares: int) -> None:
+    """kabu API で現物成行売り注文を発行する。失敗してもペーパー記録は継続。"""
+    try:
+        from broker_client import KabuClient
+        client = KabuClient()
+        client.authenticate()
+        code4  = KabuClient.to_code4(code4_or_5)
+        result = client.sell(code4, shares)
+        order_id = result.get("OrderId", "")
+        log(f"  実売り注文成功: {code4} x{shares}株  OrderId={order_id}")
+    except Exception as e:
+        log(f"  実売り注文失敗（ペーパー記録は継続）: {type(e).__name__}: {e}")
+        send_error_notify(_SCRIPT, "実売り注文失敗", str(e))
+
+
 def main() -> None:
-    log("auto_exit.py 開始")
+    log(f"auto_exit.py 開始 ({'実取引' if LIVE_TRADING else 'ペーパー'}モード)")
 
     if not Path(TRADE_LOG).exists():
         log(f"INFO: {TRADE_LOG} が見つかりません - スキップ")
@@ -228,6 +244,11 @@ def main() -> None:
         log(f"EXIT: [{strategy}] {code}  理由={reason}  "
             f"決済={exit_price:,.0f}  損益={pnl_yen:+,.0f}円 ({pnl_rate:+.2%})  "
             f"保有{held_days}日")
+
+        # ── Phase 5: 実売り注文 ──────────────────────────────
+        if LIVE_TRADING:
+            _place_live_sell(code, shares)
+
         exits_info.append((code, pnl_yen, reason))
         exited += 1
 

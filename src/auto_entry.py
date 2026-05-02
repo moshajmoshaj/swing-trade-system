@@ -1,7 +1,9 @@
 """
 src/auto_entry.py
-Phase 4 ペーパートレード - エントリー自動記録
-scanner.py 実行後に呼び出す。当日シグナル銘柄を paper_trade_log.xlsx に記録する。
+Phase 4/5 エントリー自動記録（+ Phase 5 実注文）
+
+LIVE_TRADING=false（デフォルト）: ペーパートレードのみ
+LIVE_TRADING=true              : ペーパー記録 + kabu API 実注文
 """
 import sys
 import os
@@ -24,8 +26,10 @@ TRADE_LOG    = "logs/paper_trade_log.xlsx"
 SCHED_LOG    = "logs/scheduler_log.txt"
 MONTHLY_STOP = "logs/monthly_stop.txt"
 
-MAX_POSITIONS = 5
-MAX_PER_STOCK = 200_000
+MAX_POSITIONS    = 5
+MAX_PER_STOCK    = 200_000
+LIVE_TRADING     = os.getenv("LIVE_TRADING", "false").lower() == "true"
+PHASE5_MAX_CAP   = float(os.getenv("PHASE5_MAX_CAPITAL", "500000"))
 
 
 def log(msg: str) -> None:
@@ -79,8 +83,44 @@ def load_today_signals() -> pd.DataFrame:
     return df
 
 
+def _place_live_buy(code4_or_5: str, shares: int, ref_price: float) -> str | None:
+    """
+    kabu API で現物成行買い注文を発行する。
+    失敗してもペーパートレード記録は継続するため例外は吸収する。
+    Returns: OrderId（成功時）または None（失敗時）
+    """
+    try:
+        from broker_client import KabuClient, KabuClientError
+        client = KabuClient()
+        client.authenticate()
+
+        # Phase 5 安全上限チェック
+        positions = client.get_positions()
+        current_value = sum(
+            int(p.get("LeavesQty", 0)) * float(p.get("CurrentPrice", 0))
+            for p in positions
+        )
+        order_value = shares * ref_price
+        if current_value + order_value > PHASE5_MAX_CAP:
+            log(f"SKIP(実注文): {code4_or_5} 残高上限超過 "
+                f"(現在{current_value:,.0f}円 + 注文{order_value:,.0f}円 "
+                f"> 上限{PHASE5_MAX_CAP:,.0f}円)")
+            return None
+
+        code4 = KabuClient.to_code4(code4_or_5)
+        result = client.buy(code4, shares)
+        order_id = result.get("OrderId", "")
+        log(f"  実注文成功: {code4} x{shares}株  OrderId={order_id}")
+        return order_id
+
+    except Exception as e:
+        log(f"  実注文失敗（ペーパー記録は継続）: {type(e).__name__}: {e}")
+        send_error_notify(_SCRIPT, "実注文失敗", str(e))
+        return None
+
+
 def main() -> None:
-    log("auto_entry.py 開始")
+    log(f"auto_entry.py 開始 ({'実取引' if LIVE_TRADING else 'ペーパー'}モード)")
 
     # 月次ストップチェック
     today_ym = date.today().strftime("%Y-%m")
@@ -165,7 +205,12 @@ def main() -> None:
             f"SL={stop_loss:,.0f}  TP={take_profit:,.0f}  "
             f"RSI={rsi:.1f}  保有上限={hold_limit}日")
 
-        entries_info.append((code, rsi, strategy))
+        # ── Phase 5: 実注文 ──────────────────────────────────
+        order_id = None
+        if LIVE_TRADING:
+            order_id = _place_live_buy(code, shares, entry_price)
+
+        entries_info.append((code, rsi, strategy, order_id))
         held_codes.add(code)
         next_row += 1
         entered  += 1
@@ -173,12 +218,14 @@ def main() -> None:
     wb.save(TRADE_LOG)
     log(f"INFO: {entered} 件エントリー記録 → {TRADE_LOG}")
 
-    # Gmail 通知（エントリー結果サマリー）
+    # 通知（エントリー結果サマリー）
     total_held = len(holdings) + entered
-    body_lines = [f"新規：{entered}件"]
-    for code, rsi, strat in entries_info:
+    mode_str   = "【実取引】" if LIVE_TRADING else "【ペーパー】"
+    body_lines = [f"{mode_str} 新規：{entered}件"]
+    for code, rsi, strat, order_id in entries_info:
         rsi_str = f"{rsi:.1f}" if rsi is not None else "N/A"
-        body_lines.append(f"　[{strat}] {code} RSI {rsi_str}")
+        oid_str = f" OrderID:{order_id}" if order_id else ""
+        body_lines.append(f"　[{strat}] {code} RSI {rsi_str}{oid_str}")
     body_lines.append(f"保有中：{total_held}銘柄")
     send_notify("【ST】エントリー記録完了", "\n".join(body_lines))
 
