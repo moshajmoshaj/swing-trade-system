@@ -678,14 +678,21 @@ def main():
 
     # 配当落ちフィルター（Phase 5: DIVIDEND_FILTER=true で有効）
     # IS分析でExDate前3日の勝率-33pt確認済み。A/E/Fに適用（逆張りCは除外）
-    all_codes_5d = [c + "0" for c in (codes_a + codes_e + codes_f)]
+    # codes_a/codes_e は4桁 → "0"付加で5桁化。codes_f は既に5桁のためそのまま使用
+    all_codes_5d = [c + "0" for c in (codes_a + codes_e)] + list(f_codes_set)
     exdate_map = load_exdate_map(all_codes_5d)
     if exdate_map and not result_df.empty:
         today_ts = pd.Timestamp(today)
+
+        def _code_to_5d(code) -> str:
+            """result_df の Code 列（A/E/Dは4桁、Fは5桁）を統一して5桁に変換"""
+            s = str(code)
+            return s if len(s) == 5 else s + "0"
+
         div_mask = result_df.apply(
             lambda r: (r["Signal"] and
                        r["Strategy"] in ("A", "E", "F") and
-                       is_near_exdate(today_ts, exdate_map.get(str(r["Code"]) + "0", []))),
+                       is_near_exdate(today_ts, exdate_map.get(_code_to_5d(r["Code"]), []))),
             axis=1
         )
         n_div = div_mask.sum()

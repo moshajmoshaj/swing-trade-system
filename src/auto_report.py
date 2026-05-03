@@ -70,17 +70,46 @@ def detect_pdca_impulses(df: pd.DataFrame) -> list[str]:
             sl_df       = pd.read_csv(scanner_csv, parse_dates=["Date"])
             last_dates  = sl_df["Date"].drop_duplicates().nlargest(7)
             recent      = sl_df[sl_df["Date"].isin(last_dates)]
-            daily_sig   = recent.groupby("Date")["Signal"].any().sort_index()
-            zero_streak = 0
-            for has_sig in reversed(daily_sig.values.tolist()):
+
+            # 戦略別ゼロシグナル連続確認（F は別扱い）
+            for strat_chk, reason_hint in [
+                ("A", "RSIレンジかADX閾値を緩めたくなるがOOS検証済みのため"),
+                ("E", "52週高値更新銘柄が減少中。パラメータ変更したくなるが"),
+                ("F", "EPS成長≥20%の通期決算開示がない状態。EPS閾値を下げたくなるが"),
+            ]:
+                st_df = recent[recent.get("Strategy", pd.Series(dtype=str)) == strat_chk] \
+                        if "Strategy" in recent.columns else pd.DataFrame()
+                if st_df.empty:
+                    continue
+                daily_sig = st_df.groupby("Date")["Signal"].apply(
+                    lambda x: (x.astype(str).str.strip() == "True").any()
+                ).sort_index()
+                zero_streak = 0
+                for has_sig in reversed(daily_sig.values.tolist()):
+                    if not has_sig:
+                        zero_streak += 1
+                    else:
+                        break
+                if zero_streak >= 5:
+                    entries.append(
+                        f"[{today}] 戦略{strat_chk}シグナルゼロ{zero_streak}営業日連続"
+                        f" → {reason_hint} Phase4凍結中・保留"
+                    )
+
+            # 全戦略合計のゼロ連続（従来チェック）
+            daily_sig_all = recent.groupby("Date")["Signal"].apply(
+                lambda x: (x.astype(str).str.strip() == "True").any()
+            ).sort_index()
+            zero_streak_all = 0
+            for has_sig in reversed(daily_sig_all.values.tolist()):
                 if not has_sig:
-                    zero_streak += 1
+                    zero_streak_all += 1
                 else:
                     break
-            if zero_streak >= 3:
+            if zero_streak_all >= 3:
                 entries.append(
-                    f"[{today}] シグナルゼロ{zero_streak}営業日連続"
-                    f" → RSIレンジかADX閾値を緩めたくなるがOOS検証済みのため Phase4凍結中・保留"
+                    f"[{today}] 全戦略シグナルゼロ{zero_streak_all}営業日連続"
+                    f" → 市場環境の変化を疑うが Phase4凍結中・保留"
                 )
         except Exception:
             pass
@@ -199,7 +228,7 @@ def main() -> None:
     # 戦略別損益集計
     strat_lines = []
     if not df.empty and "戦略" in df.columns:
-        for st in ["A", "C", "D", "E"]:
+        for st in ["A", "C", "D", "E", "F"]:
             sub = df[df["戦略"] == st]
             if not sub.empty:
                 st_pnl = sub["損益円"].sum()
