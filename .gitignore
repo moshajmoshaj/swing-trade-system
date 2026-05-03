@@ -8,7 +8,9 @@ data/cache/
 logs/*
 !logs/candidates.csv
 !logs/final_candidates.csv
+!logs/final_candidates_v2.csv
 !logs/strategy_c_candidates.csv
 !logs/strategy_d_candidates.csv
 !logs/strategy_e_candidates.csv
+!logs/strategy_e_candidates_v2.csv
 !logs/pdca_log.txt

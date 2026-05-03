@@ -57,6 +57,22 @@ Phase 4の合格基準を確認し、移行可否を判断する。
 - [x] `auto_entry.py` に戦略F対応を追加（Strategy='F'・2026-05-03確認済み）
 - [x] `auto_exit.py` に戦略F対応を追加（保有15日・2026-05-03確認済み）
 
+### 2-4. 配当落ち日除外フィルター（2026-05-03 新規発見）
+> IS期間分析で ExDate前3日以内のシグナルの勝率が35%（ベース68%比 -33pt）、損切率40%と判明
+
+- [ ] `scanner.py` に配当落ち日除外フィルターを追加
+  - `dividends.parquet` または J-Quants 配当API から ExDate を取得
+  - シグナル日が `ExDate - 3営業日` 以内の場合 Signal=False に抑制
+  - 対象戦略: A / E（逆張りCはむしろプラスの可能性があるため別途検討）
+- [ ] `analyze_dividends.py` の OOS 期間（2023-2026）でも検証して採用判断
+
+### 2-5. 戦略A/E v2 候補リストの正式採用
+- [ ] `python oos_backtest_cd.py E` を実行して戦略E v2 候補リスト生成
+- [ ] v2採用判断：OOS +8.86%（v1比+4.35pt）・MaxDD -10.15%
+  - v2: `logs/final_candidates_v2.csv`（29銘柄）
+  - v1: `logs/final_candidates.csv`（30銘柄、Phase 4期間は変更しない）
+  - Phase 5移行時に `final_candidates_v2.csv` → `final_candidates.csv` にリネーム
+
 ---
 
 ## Step 3：kabu API 実取引設定（〜3日）
