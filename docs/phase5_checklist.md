@@ -69,11 +69,13 @@ Phase 4の合格基準を確認し、移行可否を判断する。
 ### 2-5. 戦略A/E v2 候補リストの正式採用
 - [x] `python oos_backtest_cd.py E` 実行済み → 2593除外漏れで OOS +2.53%・MaxDD -22.23%（失敗）
 - [x] `oos_backtest_cd.py` に `"E": {"25930"}` 除外追加（2026-05-03）
-- [ ] `python oos_backtest_cd.py E` を再実行して戦略E v2 候補リスト生成（要: 伊藤園除外済み）
-- [ ] v2採用判断：OOS +8.86%（v1比+4.35pt）・MaxDD -10.15%（戦略A）
-  - v2: `logs/final_candidates_v2.csv`（29銘柄）
-  - v1: `logs/final_candidates.csv`（30銘柄、Phase 4期間は変更しない）
-  - Phase 5移行時に `final_candidates_v2.csv` → `final_candidates.csv` にリネーム
+- [x] `python oos_backtest_cd.py E` 再実行済み（伊藤園除外後）→ OOS +2.28%・MaxDD -22.68%（v1比悪化）
+- [ ] 戦略E の Phase 5採用判断:
+  - v1（伊藤園含む）: OOS +7.56%・MaxDD -11.33% ← 現行 strategy_e_candidates.csv
+  - v2（伊藤園除外）: OOS +2.28%・MaxDD -22.68% ← 大幅悪化・採用しない
+  - **推奨**: Phase 5は v1 継続使用。伊藤園シグナル発生を Phase 5 で3ヶ月観察して判断。
+- [ ] 戦略A v2採用（Phase 5移行時）: `final_candidates_v2.csv` → `final_candidates.csv` にリネーム
+  - v2: OOS +8.86%・MaxDD -10.15%（v1比 +4.35pt改善、70%銘柄入替）
 
 ---
 

@@ -182,5 +182,5 @@ if __name__ == "__main__":
     except KabuClientError as e:
         print(f"エラー: {e}")
     except requests.exceptions.ConnectionError:
-        print("接続失敗: kabuステーション® が起動していないか、"
-              "ポート番号が異なります（現在: {KABU_API_PORT}）")
+        print(f"接続失敗: kabuステーション® が起動していないか、"
+              f"ポート番号が異なります（現在: {KABU_API_PORT}）")
