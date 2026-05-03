@@ -38,9 +38,15 @@ CANDIDATES_C_CSV = "logs/strategy_c_candidates.csv"     # 戦略C: 35銘柄
 CANDIDATES_D_CSV = "logs/strategy_d_candidates.csv"     # 戦略D: 144銘柄
 CANDIDATES_E_CSV = "logs/strategy_e_candidates.csv"     # 戦略E: 30銘柄
 FINS_SUMMARY_PATH = "data/raw/fins_summary.parquet"     # 戦略F: 財務サマリーキャッシュ
+DIVIDENDS_PATH   = "data/raw/dividends.parquet"         # 配当落ちフィルター用
 SCANNER_LOG_CSV  = "logs/scanner_log.csv"               # スキャン履歴
 SCHED_LOG        = "logs/scheduler_log.txt"             # スケジューラーログ
 DAYS_TO_FETCH    = 250                                  # 指標計算に必要な日数（SMA200対応）
+
+# Phase 5 配当落ちフィルター（IS分析でExDate前3日の勝率-33pt確認済み）
+# Phase 4 は false（凍結）、Phase 5 移行時に .env で DIVIDEND_FILTER=true に設定
+DIVIDEND_FILTER      = os.getenv("DIVIDEND_FILTER", "false").lower() == "true"
+DIVIDEND_EXCL_DAYS   = 3  # ExDate 前 N 営業日のシグナルを除外
 
 # 戦略Aパラメータ（設計書準拠）
 SMA_SHORT        = 20
@@ -93,6 +99,42 @@ ATR_F_SL         = 2.0
 MAX_HOLD_F       = 15
 EPS_GROWTH_MIN   = 0.20   # EPS成長率 20%以上
 F_WINDOW_DAYS    = 7      # 決算開示後の有効日数
+
+
+def load_exdate_map(codes5: list[str]) -> dict[str, list]:
+    """
+    配当落ちフィルター用: 対象銘柄の ExDate 一覧を返す。
+    戻り値: {code5: [ExDate1, ExDate2, ...]}
+    DIVIDEND_FILTER=false のときは空辞書を返す（Phase 4 凍結）。
+    """
+    if not DIVIDEND_FILTER:
+        return {}
+    path = Path(DIVIDENDS_PATH)
+    if not path.exists():
+        log(f"WARN: {DIVIDENDS_PATH} なし → 配当フィルタースキップ")
+        return {}
+    try:
+        div = pd.read_parquet(path, columns=["Code", "ExDate"])
+        div["ExDate"] = pd.to_datetime(div["ExDate"], errors="coerce")
+        div = div[div["ExDate"].notna() & div["Code"].astype(str).isin(set(codes5))]
+        result: dict[str, list] = {}
+        for code, grp in div.groupby("Code"):
+            result[str(code)] = grp["ExDate"].tolist()
+        log(f"INFO: 配当落ちフィルター有効 – {len(result)}銘柄分のExDateを読み込み")
+        return result
+    except Exception as e:
+        log(f"WARN: 配当データ読込エラー ({e}) → フィルタースキップ")
+        return {}
+
+
+def is_near_exdate(signal_date: pd.Timestamp, exdates: list,
+                    excl_days: int = DIVIDEND_EXCL_DAYS) -> bool:
+    """signal_date が ExDate の excl_days 営業日前以内なら True を返す"""
+    for exdate in exdates:
+        diff = (exdate - signal_date).days
+        if 0 <= diff <= excl_days * 1.5:  # カレンダー日数で近似（祝日考慮のバッファ）
+            return True
+    return False
 
 
 def log(msg: str) -> None:
@@ -571,7 +613,7 @@ def display_and_save(result_df: pd.DataFrame) -> None:
 def main():
     log("scanner.py 開始")
     print("=" * 60)
-    print("  スイングトレード シグナルスキャナー（戦略A/C/D）")
+    print("  スイングトレード シグナルスキャナー（戦略A/C/D/E/F）")
     print(f"  実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
@@ -633,6 +675,24 @@ def main():
     df_f = run_scan(all_df_f, codes_f, {},            strategy="F") if codes_f else pd.DataFrame()
 
     result_df = pd.concat([df_a, df_c, df_d, df_e, df_f], ignore_index=True)
+
+    # 配当落ちフィルター（Phase 5: DIVIDEND_FILTER=true で有効）
+    # IS分析でExDate前3日の勝率-33pt確認済み。A/E/Fに適用（逆張りCは除外）
+    all_codes_5d = [c + "0" for c in (codes_a + codes_e + codes_f)]
+    exdate_map = load_exdate_map(all_codes_5d)
+    if exdate_map and not result_df.empty:
+        today_ts = pd.Timestamp(today)
+        div_mask = result_df.apply(
+            lambda r: (r["Signal"] and
+                       r["Strategy"] in ("A", "E", "F") and
+                       is_near_exdate(today_ts, exdate_map.get(str(r["Code"]) + "0", []))),
+            axis=1
+        )
+        n_div = div_mask.sum()
+        if n_div > 0:
+            result_df.loc[div_mask, "Signal"] = False
+            result_df.loc[div_mask, "FailedConds"] = "配当落ち除外"
+            log(f"INFO: 配当落ちフィルター {n_div}件抑制 (ExDate前{DIVIDEND_EXCL_DAYS}日以内)")
 
     # レジームフィルター: 非アクティブ戦略のシグナルを抑制
     if not result_df.empty:

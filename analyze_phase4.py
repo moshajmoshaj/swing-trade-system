@@ -27,7 +27,8 @@ from datetime import datetime, date
 import pandas as pd
 import numpy as np
 
-TRADE_LOG  = Path("logs/paper_trade_log.xlsx")
+TRADE_LOG    = Path("logs/paper_trade_log.xlsx")
+SCANNER_LOG  = Path("logs/scanner_log.csv")
 PHASE4_START = date(2026, 4, 27)
 PHASE4_END   = date(2026, 7, 27)
 INITIAL_CAPITAL = 1_000_000
@@ -256,6 +257,62 @@ def main() -> None:
         print("\n  ⚠️  Phase 4 終了しましたが合格基準未達。Phase 4 延長を検討してください。")
     else:
         print(f"\n  Phase 4 実行中（残り{remaining}日）。引き続きデータを蓄積してください。")
+
+    # ── シャープレシオ ────────────────────────────────────
+    if not closed.empty and len(closed) >= 5:
+        print_header("シャープレシオ（取引ベース）")
+        pnls = closed.sort_values("exit_date")["pnl_yen"]
+        mean_r = pnls.mean()
+        std_r  = pnls.std()
+        sharpe = (mean_r / std_r * np.sqrt(252)) if std_r > 0 else 0.0
+        print(f"  平均損益/取引: {mean_r:+,.0f}円")
+        print(f"  標準偏差    : {std_r:,.0f}円")
+        print(f"  シャープレシオ（年換算）: {sharpe:.2f}")
+        print(f"  ※ 取引ベース簡易計算。1以上が目標。")
+
+    # ── シグナル頻度分析 ──────────────────────────────────
+    if SCANNER_LOG.exists():
+        print_header("シグナル頻度分析（scanner_log.csv）")
+        try:
+            sc = pd.read_csv(SCANNER_LOG, dtype=str)
+            sc["Date"]   = pd.to_datetime(sc["Date"], errors="coerce")
+            sc["Signal"] = sc["Signal"].astype(str).str.strip()
+            sc = sc[sc["Date"] >= pd.Timestamp(PHASE4_START)]
+
+            scan_days   = sc["Date"].nunique()
+            total_sigs  = (sc["Signal"] == "True").sum()
+            print(f"  スキャン実行回数: {scan_days}日")
+            print(f"  総シグナル数    : {total_sigs}件")
+            print(f"  1日平均シグナル : {total_sigs/scan_days:.1f}件" if scan_days > 0 else "")
+
+            if "Strategy" in sc.columns:
+                print(f"\n  戦略別シグナル（Signal=True）:")
+                by_strat = sc[sc["Signal"] == "True"].groupby("Strategy")["Date"].count()
+                for strat, n in by_strat.items():
+                    print(f"    {strat}: {n}件 (うち採用率未追跡)")
+
+        except Exception as e:
+            print(f"  読み込みエラー: {e}")
+
+    # ── エクイティカーブ（テキスト）────────────────────────
+    if not closed.empty and len(closed) >= 3:
+        print_header("エクイティカーブ（テキスト）")
+        eq_series = closed.sort_values("exit_date").set_index("exit_date")["pnl_yen"].cumsum()
+        eq_series = INITIAL_CAPITAL + eq_series
+        # 月次でリサンプル
+        eq_m = eq_series.resample("ME").last().dropna()
+        if len(eq_m) > 0:
+            peak_cap = eq_m.max()
+            bar_width = 30
+            print(f"  {'年月':<8} {'資産':>10}  グラフ（{INITIAL_CAPITAL/10000:.0f}万起点）")
+            print(f"  {'-'*8} {'-'*10}  {'-'*bar_width}")
+            for ym, cap in eq_m.items():
+                diff = cap - INITIAL_CAPITAL
+                n_bars = int((cap - INITIAL_CAPITAL * 0.95) /
+                             max(peak_cap - INITIAL_CAPITAL * 0.95, 1) * bar_width)
+                bar  = "█" * max(0, n_bars)
+                mark = " ▲" if diff > 0 else " ▼"
+                print(f"  {ym.strftime('%Y-%m'):<8} {cap:>10,.0f}  {bar}{mark}{diff:+,.0f}円")
 
 
 if __name__ == "__main__":

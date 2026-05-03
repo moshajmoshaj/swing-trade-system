@@ -153,6 +153,8 @@ def run_portfolio(stock_data: dict, start: str, end: str,
             if reason:
                 cost = (pos["entry_price"] + exit_p) * pos["shares"] * COST_LEG
                 pnl  = (exit_p - pos["entry_price"]) * pos["shares"] - cost
+                if not np.isfinite(pnl):
+                    pnl = 0.0  # 欠損・異常値ガード
                 capital += pnl
                 trades.append({"pnl": pnl, "win": pnl > 0})
                 to_close.append(code)
@@ -202,6 +204,9 @@ def run_portfolio(stock_data: dict, start: str, end: str,
 
     # ── メトリクス計算 ──
     eq = np.array(equity, dtype=float)
+    # NaN混入ガード（価格欠損等で capital が NaN になった場合）
+    if not np.isfinite(capital):
+        capital = float(equity[-2]) if len(equity) > 1 else float(INITIAL_CAPITAL)
     years = (t_end - t_start).days / 365.25
     try:
         ratio = capital / INITIAL_CAPITAL
@@ -240,11 +245,14 @@ def main() -> None:
     print("\n価格データ読み込み中...")
     prices_all = pd.read_parquet(DATA_PATH)
     prices_all["Date"] = pd.to_datetime(prices_all["Date"])
-    # Code列を正規化（5桁）
-    prices_all["Code"] = prices_all["Code"].astype(str).str.strip()
-    if "Code4" in prices_all.columns:
-        mask = prices_all["Code"].str.len() == 4
-        prices_all.loc[mask, "Code"] = prices_all.loc[mask, "Code"] + "0"
+    # Code列をoos_backtest.pyと同じ方式で5桁に正規化（Code4列を使用）
+    prices_all["Code"] = prices_all["Code4"].astype(str).str.zfill(4) + "0"
+    # Open/High/Low/Close/Volumeは prices_20y に既存（リネーム不要）
+    drop_c = [c for c in ["O","H","L","C","Vo","Va","UL","LL","AdjFactor",
+                           "MO","MH","ML","MC","MUL","MLL","MVo","MVa",
+                           "AO","AH","AL","AC","AUL","ALL","AVo","AVa","Code4"]
+              if c in prices_all.columns]
+    prices_all = prices_all.drop(columns=drop_c)
     print(f"  {len(prices_all):,}行  {prices_all['Code'].nunique():,}銘柄  "
           f"{prices_all['Date'].min().date()} ~ {prices_all['Date'].max().date()}")
 
