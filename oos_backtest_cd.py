@@ -33,7 +33,7 @@ OOS_WARMUP= pd.Timestamp("2022-01-01")
 INITIAL_CAPITAL = 1_000_000
 MAX_POSITIONS   = 5
 MAX_POS_RATIO   = 0.20
-DATA_PATH       = Path("data/raw/prices_10y.parquet")
+DATA_PATH       = Path("data/raw/prices_20y.parquet")
 
 # ── 取引コスト（戦略Aと同一） ────────────────────────────────
 COMMISSION_RATE = 0.00055
@@ -314,6 +314,21 @@ def run_strategy(strategy: str, df_all: pd.DataFrame, name_map: dict, sector_map
                     reverse=True)
     selected = [c for c, _ in scored[:p["target_n"]]]
     print(f"  選定: {len(selected)} 銘柄")
+
+    # 戦略E のみ Phase 5 候補リスト保存（_v2: Phase 4候補を上書きしない）
+    if strategy == "E":
+        out_v2 = Path("logs/strategy_e_candidates_v2.csv")
+        rows = []
+        for c in selected:
+            r = candidates.get(c, {})
+            rows.append({"Code": c[:4], "Name": name_map.get(c, c),
+                         "Trades": r.get("total", 0),
+                         "WinRate": round(r.get("win_rate", 0), 1),
+                         "FinalPnL": round(r.get("final_pnl", 0), 0),
+                         "MaxDD": round(r.get("max_dd", 0), 2),
+                         "PValue": round(r.get("p_value", 1.0), 3)})
+        pd.DataFrame(rows).to_csv(out_v2, index=False, encoding="utf-8-sig")
+        print(f"  → {out_v2} に保存（Phase 5移行用・prices_20y使用）")
 
     # OOS指標計算
     print(f"\n【STEP3】OOS指標計算中（ウォームアップ: {OOS_WARMUP.date()}〜）")

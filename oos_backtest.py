@@ -60,7 +60,7 @@ COMMISSION_RATE = 0.00055
 SLIPPAGE_RATE   = 0.00050
 COST_PER_LEG    = COMMISSION_RATE + SLIPPAGE_RATE  # 片道 0.105%
 
-DATA_PATH = Path("data/raw/prices_10y.parquet")
+DATA_PATH = Path("data/raw/prices_20y.parquet")
 
 
 def run_single_backtest(df: pd.DataFrame, bt_start: pd.Timestamp, bt_end: pd.Timestamp) -> dict:
@@ -623,6 +623,20 @@ def main() -> None:
                 break
 
     print(f"  選定銘柄: {len(selected5)} 銘柄（業種分散適用）")
+
+    # Phase 5 候補リスト保存（_v2: Phase 4候補を上書きしない）
+    out_v2 = Path("logs/final_candidates_v2.csv")
+    rows = []
+    for c in selected5:
+        r = candidates.get(c) or is_results.get(c, {})
+        rows.append({"code": c[:4], "name": name_map.get(c, c),
+                     "trades": r.get("total", 0),
+                     "win_rate": round(r.get("win_rate", 0), 1),
+                     "final_pnl": round(r.get("final_pnl", 0), 0),
+                     "max_dd": round(r.get("max_dd", 0), 2),
+                     "p_value": round(r.get("p_value", 1.0), 3)})
+    pd.DataFrame(rows).to_csv(out_v2, index=False, encoding="utf-8-sig")
+    print(f"  → {out_v2} に保存（Phase 5移行用・prices_20y使用）")
 
     # ── OOS指標計算（ウォームアップ含む全期間データ使用）─────
     print(f"\n【STEP3】OOS指標計算中（ウォームアップ: {OOS_WARMUP.date()}〜）")

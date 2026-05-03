@@ -41,22 +41,21 @@ Phase 4の合格基準を確認し、移行可否を判断する。
 ## Step 2：候補銘柄の再選定（〜1週間）
 
 ### 2-1. 戦略A v2候補リスト作成
-- [ ] `oos_backtest.py` を `prices_20y.parquet` で再実行
-  - IS期間：2016-04-01〜2020-12-31（変更なし）
-  - 候補数：30銘柄（変更なし）
+- [x] `oos_backtest.py` のDATA_PATHを `prices_20y.parquet` に更新（2026-05-03）
+- [x] 実行時に `logs/final_candidates_v2.csv` を自動保存するよう修正（2026-05-03）
+- [ ] `python oos_backtest.py` を実行して v2 候補リスト生成
 - [ ] 現行30銘柄と比較して差分を確認
 
 ### 2-2. 戦略E v2候補リスト作成
-- [ ] `oos_backtest_cd.py` の戦略E部分を `prices_20y.parquet` で再実行
-- [ ] 候補30銘柄を更新
+- [x] `oos_backtest_cd.py` のDATA_PATHを `prices_20y.parquet` に更新（2026-05-03）
+- [x] 戦略E実行時に `logs/strategy_e_candidates_v2.csv` を自動保存するよう修正（2026-05-03）
+- [ ] `python oos_backtest_cd.py E` を実行して v2 候補リスト生成
+- [ ] 候補30銘柄と差分を確認
 
 ### 2-3. 戦略F 候補スキャナー整備
-- [ ] `scanner.py` に戦略F（PEAD）のシグナル検出を追加
-  - `fins_summary.parquet` から当日開示の決算イベントを取得
-  - EPS成長20%以上のイベントをフィルタリング
-  - 技術的条件（SMA200・RSI・出来高）を確認
-- [ ] `auto_entry.py` に戦略F対応を追加（Strategy='F'）
-- [ ] `auto_exit.py` に戦略F対応を追加（保有15日）
+- [x] `scanner.py` に戦略F（PEAD）のシグナル検出を追加（2026-05-02実装済み）
+- [x] `auto_entry.py` に戦略F対応を追加（Strategy='F'・2026-05-03確認済み）
+- [x] `auto_exit.py` に戦略F対応を追加（保有15日・2026-05-03確認済み）
 
 ---
 
