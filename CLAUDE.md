@@ -33,4 +33,21 @@ Read: docs/swing_trade_master.md
 - 自動スイングトレードシステム
 - Python ベースのバックテスト・戦略実装
 - 主要コード: `src/` ディレクトリ
-- 設計書: `docs/swing_trade_master.md`
+- 設計書: `docs/swing_trade_master.md`（Version 4.7）
+
+## 現在の状況（2026-05-03 時点）
+
+- **Phase 4 実行中**（2026-04-27〜2026-07-27）：毎日17:00自動実行中
+- **Phase 4 並行研究 完全完了**：Premium全データ分析・フィルター検証・Phase5準備
+- **口座開設中**：三菱UFJ eスマート証券（2026-05-02申込・1〜4営業日で開設）
+- **次のアクション**：口座開設完了後に `setup_kabu_startup.ps1` を実行
+
+## 重要ドキュメント
+
+| ファイル | 内容 |
+|---------|------|
+| `docs/swing_trade_master.md` | 設計書（本体・全研究結果） |
+| `docs/phase5_checklist.md` | Phase 5 移行チェックリスト |
+| `docs/phase5_operations.md` | Phase 5 日次運用・障害時マニュアル |
+| `logs/pdca_log.txt` | Phase 4 変更衝動の記録 |
+| `migrate_to_phase5.py` | Phase 5 移行ワンクリックスクリプト |

@@ -707,7 +707,7 @@ swing-trade-system/
 | cfd41a9 | perf: ベクトル化で103倍高速化 |
 | 7f06eac | docs: 設計書Version 3.5・戦略E組み込み・Section 5/10/11更新 |
 | baf4bb0 | feat: 戦略Eをスキャナー・auto_exitに組み込み・候補30銘柄CSV追加 |
-| （本日） | feat: 市場レジームフィルター追加・scanner.pyに組み込み |
+| e6835a6 | feat: 市場レジームフィルター追加・設計書Version 3.6 |
 | 4203f1f | Phase3完了: 戦略A+B検証・ベスト設定確定(年利8.56%・DD-8.49%) |
 | 78b886c | docs: 目標・資金計画・人生設計前提を現実的に見直し(Version 2.1) |
 | b9ced27 | Phase4開始: scanner・バッチ・タスクスケジューラ設定完了(Version 2.2) |
