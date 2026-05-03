@@ -67,8 +67,10 @@ Phase 4の合格基準を確認し、移行可否を判断する。
 - [ ] `analyze_dividends.py` の OOS 期間（2023-2026）でも検証して採用判断
 
 ### 2-5. 戦略A/E v2 候補リストの正式採用
-- [ ] `python oos_backtest_cd.py E` を実行して戦略E v2 候補リスト生成
-- [ ] v2採用判断：OOS +8.86%（v1比+4.35pt）・MaxDD -10.15%
+- [x] `python oos_backtest_cd.py E` 実行済み → 2593除外漏れで OOS +2.53%・MaxDD -22.23%（失敗）
+- [x] `oos_backtest_cd.py` に `"E": {"25930"}` 除外追加（2026-05-03）
+- [ ] `python oos_backtest_cd.py E` を再実行して戦略E v2 候補リスト生成（要: 伊藤園除外済み）
+- [ ] v2採用判断：OOS +8.86%（v1比+4.35pt）・MaxDD -10.15%（戦略A）
   - v2: `logs/final_candidates_v2.csv`（29銘柄）
   - v1: `logs/final_candidates.csv`（30銘柄、Phase 4期間は変更しない）
   - Phase 5移行時に `final_candidates_v2.csv` → `final_candidates.csv` にリネーム
