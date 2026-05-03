@@ -27,9 +27,9 @@ if !errorlevel! neq 0 (
 )
 
 rem --- business day check ---
-%VENV_PYTHON% %CHECK_BIZDAY% > "!BIZDAY_TMP!" 2>&1
+for /f "delims=" %%L in ('%VENV_PYTHON% %CHECK_BIZDAY% 2^>nul') do set BIZDAY_MSG=%%L
 set BIZDAY_EXIT=!errorlevel!
-del "!BIZDAY_TMP!" 2>nul
+echo [%date% %time:~0,8%] !BIZDAY_MSG! >> "%PROJECT_DIR%\logs\scheduler_log.txt"
 
 if !BIZDAY_EXIT! neq 0 (
     goto :end

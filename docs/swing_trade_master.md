@@ -638,9 +638,9 @@ swing-trade-system/
 ### 目的
 実運用移行前に、リアルタイムのシグナルで3ヶ月間の模擬取引を行う。
 
-### 自動化構成（2026-04-29更新）
+### 自動化構成（2026-05-03更新）
 - 実行方式：Windowsタスクスケジューラ（毎営業日17:00自動実行）
-- 土日・祝日：`check_bizday.py` で自動スキップ
+- 土日・祝日：`check_bizday.py` で自動スキップ（スキップ理由を `scheduler_log.txt` に記録）
 - スマホ通知：ntfy（トピック：swing-trade-moshaj-2026）
 - 実行フロー：
   ① `auto_exit.py`：保有銘柄の決済判定（戦略別保有日数：A=10日・C=7日・D=5日）
@@ -745,6 +745,10 @@ swing-trade-system/
 | a594385 | feat/fix: Phase5完全準備完了 - scanner配当フィルターバグ修正・移行スクリプト |
 | c1a5bd2 | docs: 設計書 Version 4.6 - OOS配当検証・移行スクリプト・フィルター確定 |
 | d217cf5 | fix: 設計書ヘッダーの文字化け修正 |
+| 5b94375 | docs: 設計書 Version 4.7 - 整合性確認・Git履歴・フィルター記述を最終更新 |
+| a85ba0c | docs: 設計書 Version 4.7 最終整備・CLAUDE.md 現況追記 |
+| 1c9f57b | feat: 空売り比率OOS検証完了 - IS+0.055→OOS-0.021で不採用確定・設計書v4.8 |
+| (today) | fix: run_scanner.bat 祝日スキップをscheduler_log.txtに記録するよう修正 |
 
 ---
 
