@@ -1,5 +1,5 @@
 # 自動売買システム設計書
-**最終更新：2026年5月2日　Version 4.1**
+**最終更新：2026年5月3日　Version 4.5**
 
 ---
 
@@ -102,6 +102,7 @@
 | 7 | 陽線確認 | 終値 > 始値 |
 | 8 | ADXフィルター | ADX(14) > 15 |
 | 9 | 決算除外 | 決算発表前後3営業日はエントリー禁止 |
+| 10 | 配当落ち除外 | ExDate前3営業日以内はエントリー禁止（**Phase 5から有効**・`.env` `DIVIDEND_FILTER=true`） |
 
 #### エグジットルール
 | 条件 | 設定 |
@@ -248,15 +249,15 @@
 
 #### Phase 4 稼働中戦略（凍結・変更不可）
 
-| 戦略 | 状態 | OOS年利（コスト込み） | 20年バックテストOOS | 目標 |
-|------|------|---------------------|-------------------|------|
-| 戦略A | 🔄 Phase4稼働中 | +4.51% | **+15.3%** | 15% |
-| 戦略C | 🔄 Phase4稼働中 | +4.40% | +0.8% | — |
-| 戦略D | 🔄 Phase4稼働中 | +0.55% | +0.2% | — |
-| 戦略E | 🔄 Phase4稼働中 | +7.56% | **+5.3%** | — |
-| **合計目標** | — | **約+5〜8%（推定）** | — | **15%** |
+| 戦略 | 状態 | OOS年利（コスト込み） | 20年バックテストOOS | 20年バックテストIS | 目標 |
+|------|------|---------------------|-------------------|------------------|------|
+| 戦略A | 🔄 Phase4稼働中 | +4.51% | **+15.3%** | **IS:+13.5%** | 15% |
+| 戦略C | 🔄 Phase4稼働中 | +4.40% | +0.8% | IS:-3.7% | — |
+| 戦略D | 🔄 Phase4稼働中 | +0.55% | +0.2% | IS:+2.7% | — |
+| 戦略E | 🔄 Phase4稼働中 | +7.56% | **+5.3%** | IS:+10.8% | — |
+| **合計目標** | — | **約+5〜8%（推定）** | — | — | **15%** |
 
-> ⚠️ 20年バックテスト（2026-05-02実施）：戦略AはPre-IS（2008-2015）でも+11.4%を記録し、全期間で本物のエッジを確認。戦略Cはポートフォリオレベルで全期間ほぼマイナス（個別銘柄選択バイアス）。戦略Dは取引数不足で実質無効。
+> ⚠️ 20年バックテスト（2026-05-02実施・2026-05-03 CAGR nan%バグ修正版）：戦略AはPre-IS（2008-2015）+11.4%・IS+13.5%・OOS+15.3%と全期間で本物のエッジ確認。戦略Cは全期間マイナス（個別銘柄選択バイアス）。戦略Dは取引数不足で実質無効。
 > ⚠️ 戦略の年利は単純加算できない。同じ相場環境で同時に機能しない可能性がある。
 > ⚠️ 年利15%は月5万円の安定収入に必要な最低ライン。退職金投入条件でもある。
 
@@ -383,11 +384,28 @@ https://github.com/moshajmoshaj/swing-trade-system
 ```
 swing-trade-system/
 ├── .env                         ← APIキー（GitHubに上げない）
+├── .env.example                 ✅ 環境変数テンプレート（全変数の説明付き）
 ├── .gitignore                   ← parquetファイル除外済み
 ├── requirements.txt
-├── oos_backtest.py              ✅ 戦略A OOSバックテスト（コスト込み・p値フィルター）
-├── oos_backtest_cd.py           ✅ 戦略C/D/E OOSバックテスト（コスト込み・p値フィルター）
+│
+├── ── バックテスト・再選定 ──────────────────────────────
+├── oos_backtest.py              ✅ 戦略A OOSバックテスト（prices_20y対応・v2 CSV保存）
+├── oos_backtest_cd.py           ✅ 戦略C/D/E OOSバックテスト（伊藤園除外・v2 CSV保存）
+├── backtest_20y.py              ✅ 4戦略×20年時代別バックテスト（CAGR nan%バグ修正済み）
 ├── step3_combined.py            ✅ 戦略A+B統合バックテスト（参考保存）
+│
+├── ── 分析スクリプト群（Phase 4研究） ─────────────────────
+├── analyze_phase4.py            ✅ Phase 4実績分析・OOS予測比較・シャープレシオ・エクイティカーブ
+├── analyze_sector_regime.py     ✅ 業種別レジーム分析＋ISバックテスト（不採用確認済み）
+├── analyze_mkt_breakdown.py     ✅ 売買内訳×シグナル相関（不採用確認済み）
+├── analyze_investor_types.py    ✅ 外国人フロー×シグナル相関（不採用確認済み）
+├── analyze_dividends.py         ✅ 配当落ち日効果分析（ExDate前3日-33pt → Phase5フィルター）
+├── analyze_short_ratio.py       ✅ 業種別空売り比率×シグナル相関（Phase5でOOS検証）
+├── analyze_financials.py        ✅ 財務プロファイル分析（ROE高→勝率低の逆説確認）
+├── backtest_margin_filter.py    ✅ 信用倍率フィルター効果検証（不採用）
+├── optimize_hold_days_a.py      ✅ 戦略A保有日数最適化（現行10日が最適）
+├── fetch_all_premium.py         ✅ Premiumデータ一括取得（783MB取得済み）
+│
 ├── src/
 │   ├── data_fetcher.py          ✅ J-Quants API接続・銘柄一覧取得
 │   ├── indicators.py            ✅ テクニカル指標計算
@@ -399,10 +417,11 @@ swing-trade-system/
 │   ├── backtest.py              ✅ 単銘柄バックテスト（ベクトル化済み）
 │   ├── portfolio_backtest.py    ✅ ポートフォリオバックテスト
 │   ├── market_regime.py         ✅ 市場レジーム判定（TOPIX SMA50/200・3段階）
-│   ├── scanner.py               ✅ 戦略A/C/D/E 4戦略シグナルスキャン＋レジームフィルター
-│   ├── auto_entry.py            ✅ シグナル銘柄の自動エントリー記録（戦略別対応）
-│   ├── auto_exit.py             ✅ 決済条件自動判定（戦略別保有日数：A=10・C=7・D=5・E=10）
+│   ├── scanner.py               ✅ 戦略A/C/D/E/F シグナルスキャン＋レジーム＋配当フィルター
+│   ├── auto_entry.py            ✅ 自動エントリー記録（戦略A/C/D/E/F対応・Phase5実注文）
+│   ├── auto_exit.py             ✅ 決済自動判定（保有日数：A=10・C=7・D=5・E=10・F=15）
 │   ├── auto_report.py           ✅ 月次集計・戦略別損益日次通知・PDCA自動記録
+│   ├── broker_client.py         ✅ kabu API クライアント（Phase 5 実取引用）
 │   ├── notifier.py              ✅ ntfyスマホ通知
 │   ├── check_bizday.py          ✅ 土日・祝日判定
 │   ├── get_ts.py                ✅ タイムスタンプ取得ヘルパー
@@ -410,15 +429,23 @@ swing-trade-system/
 │       └── risk.py              ✅ ポジションサイズ・損切り計算
 ├── data/
 │   └── raw/                     ← parquetファイル（Git管理外・再取得可能）
-│       └── prices_10y.parquet      全銘柄10年分（90.3MB・約2.5分で再取得）
+│       ├── prices_10y.parquet      全銘柄10年分（90.3MB）
+│       ├── prices_20y.parquet      全銘柄20年分（336MB・Premium取得済み）
+│       ├── fins_summary.parquet    財務サマリー（14MB・EPS/ROE等）
+│       ├── mkt_breakdown.parquet   売買内訳（223MB）
+│       └── …（indices/dividends/short_ratio/investor_types等）
 ├── logs/
 │   ├── candidates.csv              ✅ 運用候補708銘柄
-│   ├── final_candidates.csv        ✅ 戦略A候補30銘柄（p値フィルター後）
+│   ├── final_candidates.csv        ✅ 戦略A候補30銘柄（Phase 4 v1・変更禁止）
+│   ├── final_candidates_v2.csv     ✅ 戦略A候補29銘柄（Phase 5 v2・prices_20y再選定）
 │   ├── strategy_c_candidates.csv   ✅ 戦略C候補20銘柄（p値フィルター後）
 │   ├── strategy_d_candidates.csv   ✅ 戦略D候補10銘柄（p値フィルター後・2593除外済み）
-│   └── strategy_e_candidates.csv   ✅ 戦略E候補30銘柄（p値フィルター後）
+│   ├── strategy_e_candidates.csv   ✅ 戦略E候補30銘柄（Phase 4 v1・変更禁止）
+│   └── pdca_log.txt                ✅ Phase 4 変更衝動の記録
 └── docs/
-    └── swing_trade_master.md    ← 本設計書
+    ├── swing_trade_master.md       ← 本設計書
+    ├── phase5_checklist.md         ✅ Phase 5 移行チェックリスト（Step 2-1〜2-5 更新済み）
+    └── phase5_operations.md        ✅ Phase 5 日次運用手順・障害時マニュアル
 ```
 
 ---
@@ -520,6 +547,18 @@ swing-trade-system/
 > ただし概算バックテストのため、Phase 4ペーパートレードで検証後に正式採用を判断する。
 > 現行ルール（10日）のままPhase 4へ進む。
 
+### 財務プロファイル分析（2026-05-03 analyze_financials.py 実施）
+
+| 指標 | 候補中央値 | 市場中央値 | OOS勝率との相関 |
+|------|----------|----------|--------------|
+| ROE | 8.7% | 6.9% | **-0.45**（高ROE→低勝率） |
+| 営業利益率 | 7.6% | 6.2% | **-0.59**（高利益率→低勝率） |
+| EPS成長率 | -22.3% | — | -0.15 |
+
+> 💡 候補銘柄は市場平均より財務品質が高いが、**その中で財務品質の高い候補ほど OOS 勝率が低い**。  
+> モメンタム戦略は「財務的に見落とされがちな銘柄」でより機能するというエビデンス。  
+> Track A の「財務フィルター=取引数減少・CAGR 低下」と整合。
+
 ---
 
 ## 8. 整合性確認結果（コード vs 設計書）
@@ -553,27 +592,37 @@ swing-trade-system/
 | Phase 5 | 少額実運用（50万以下）・kabu API統合済み | 🔜 口座開設中（2026-05-02申込） |
 | Phase 6 | 実運用フル稼働・自動化 | ❌ 未着手 |
 
-#### Phase 4 並行Track（2026-05-02完了）
+#### Phase 4 並行Track（2026-05-03 全完了）
 
 | Track | 内容 | 状態 |
 |-------|------|------|
-| Track A | 20年バックテスト・新戦略研究・フィルター検証 | ✅ 完了 |
+| Track A | 20年バックテスト・新戦略研究・フィルター検証・Premium全データ分析 | ✅ 完了（2026-05-03） |
 | Track B | Phase 5実行インフラ（kabu API・kabuStation自動起動） | ✅ コード実装完了・口座開設中 |
-| Track C | Phase 4分析基盤・業種別レジーム研究 | ✅ 骨格完成（データ蓄積後に本格分析） |
+| Track C | Phase 4分析基盤（データ蓄積後に本格分析） | 🔜 骨格完成・6月以降に本格着手 |
 
-#### Phase 4 並行作業で作成したスクリプト一覧
+#### Phase 4 並行作業で作成・強化したスクリプト一覧
 
-| スクリプト | 目的 |
-|-----------|------|
-| `fetch_all_premium.py` | Premiumデータ一括取得（783MB取得済み） |
-| `backtest_20y.py` | 4戦略 × 20年時代別バックテスト |
-| `optimize_hold_days_a.py` | 戦略A保有日数最適化（現行10日が最適） |
-| `analyze_phase4.py` | Phase 4実績分析・OOS予測との比較 |
-| `analyze_sector_regime.py` | 業種別レジーム分析（33業種） |
-| `backtest_margin_filter.py` | 信用倍率フィルター効果検証（不採用） |
-| `src/broker_client.py` | kabu API クライアント |
-| `setup_kabu_startup.ps1` | kabuStation自動起動設定（口座開設後1回実行） |
-| `docs/phase5_checklist.md` | Phase 5移行チェックリスト |
+| スクリプト | 目的 | 状態 |
+|-----------|------|------|
+| `fetch_all_premium.py` | Premiumデータ一括取得（783MB取得済み） | ✅ |
+| `backtest_20y.py` | 4戦略×20年時代別バックテスト（CAGR nan%バグ修正済み） | ✅ |
+| `oos_backtest.py` | 戦略A v2再選定（prices_20y対応・CSV保存追加） | ✅ |
+| `oos_backtest_cd.py` | 戦略E v2再選定（伊藤園除外追加・CSV保存追加） | ✅ |
+| `optimize_hold_days_a.py` | 戦略A保有日数最適化（現行10日が最適） | ✅ |
+| `analyze_phase4.py` | Phase 4実績分析・シャープレシオ・エクイティカーブ追加 | ✅ |
+| `analyze_sector_regime.py` | 業種別レジーム分析＋IS期間バックテスト（不採用確認） | ✅ |
+| `analyze_mkt_breakdown.py` | 売買内訳×シグナル相関分析（不採用確認） | ✅ |
+| `analyze_investor_types.py` | 外国人フロー×シグナル相関分析（不採用確認） | ✅ |
+| `analyze_dividends.py` | 配当落ち日効果分析（ExDate前3日-33pt → Phase5フィルター実装） | ✅ |
+| `analyze_short_ratio.py` | 業種別空売り比率分析（Phase5でOOS検証予定） | ✅ |
+| `analyze_financials.py` | 財務プロファイル分析（ROE高→勝率低の逆説確認） | ✅ |
+| `backtest_margin_filter.py` | 信用倍率フィルター効果検証（不採用） | ✅ |
+| `src/broker_client.py` | kabu API クライアント（f文字列バグ修正済み） | ✅ |
+| `src/scanner.py` | 戦略F統合・配当落ちフィルター追加（Phase5フラグ） | ✅ |
+| `setup_kabu_startup.ps1` | kabuStation自動起動設定（口座開設後1回実行） | ✅ |
+| `docs/phase5_checklist.md` | Phase 5移行チェックリスト（Step 2-1〜2-5 更新済み） | ✅ |
+| `docs/phase5_operations.md` | Phase 5 日次運用手順・障害時マニュアル（新規作成） | ✅ |
+| `.env.example` | 環境変数テンプレート（全変数の説明付き） | ✅ |
 
 ---
 
@@ -588,7 +637,7 @@ swing-trade-system/
 - スマホ通知：ntfy（トピック：swing-trade-moshaj-2026）
 - 実行フロー：
   ① `auto_exit.py`：保有銘柄の決済判定（戦略別保有日数：A=10日・C=7日・D=5日）
-  ② `scanner.py`：戦略A/C/D/E 約230銘柄シグナルスキャン
+  ② `scanner.py`：戦略A/C/D/E/F 約230銘柄シグナルスキャン＋配当落ちフィルター（Phase5有効）
   ③ `auto_entry.py`：RSI降順・空き枠にエントリー記録（Strategy列に戦略種別を記録）
   ④ `auto_report.py`：月次集計・戦略別損益を日次通知
 - ログ確認：`logs/scheduler_log.txt`
@@ -635,7 +684,7 @@ swing-trade-system/
 | 順序 | スクリプト | 処理内容 |
 |------|-----------|---------|
 | ① | `auto_exit.py` | 保有銘柄の損切り/利確/強制終了（戦略別保有日数適用）・損益記録 |
-| ② | `scanner.py` | 戦略A/C/D/E 約230銘柄シグナルスキャン |
+| ② | `scanner.py` | 戦略A/C/D/E/F 約230銘柄シグナルスキャン＋配当落ちフィルター |
 | ③ | `auto_entry.py` | RSI降順・空き枠にエントリー記録（Strategy列書き込み） |
 | ④ | `auto_report.py` | 月次集計・戦略別損益を日次通知・PDCA衝動を自動検出してlogs/pdca_log.txtに記録・通知に追記 |
 
@@ -679,6 +728,13 @@ swing-trade-system/
 | 21dfa9b | feat: 戦略C/Dにp値フィルター・TP倍率改善→C:+4.40% D:+0.55%に改善 |
 | 490da00 | feat: 戦略E（52週高値ブレイクアウト）実装・OOS年利+7.56% |
 | baf4bb0 | feat: 戦略Eをスキャナー・auto_exitに組み込み・候補30銘柄CSV追加 |
+| 8026de7 | feat: Phase4並行研究完了 - Premium データ全フィルター検証・Phase5準備 |
+| aee71cb | feat: Phase4 Premium データ全分析完了・Phase5準備完結 |
+| c1c8e25 | fix: 戦略E v2 の伊藤園異常銘柄除外・Phase5チェックリスト更新 |
+| 8cfda82 | fix/docs: 戦略E v2 伊藤園除外後の結果記録・broker_client バグ修正 |
+| b55904a | feat/fix: 残課題全対応 - 配当フィルター実装・財務分析・バグ修正 |
+| b1f7520 | docs: 財務プロファイル分析結果追加 - Version 4.4 |
+| 6ea062a | fix: backtest_20y CAGR nan%バグ修正完了をPDCAログに記録 |
 
 ---
 
@@ -697,16 +753,4 @@ swing-trade-system/
 ---
 
 *本ドキュメントはフェーズ完了時・重要な変更時に更新する*
-#### 財務プロファイル分析（2026-05-03 analyze_financials.py 実施）
-
-| 指標 | 候補中央値 | 市場中央値 | OOS勝率との相関 |
-|------|----------|----------|--------------|
-| ROE | 8.7% | 6.9% | **-0.45**（高ROE→低勝率） |
-| 営業利益率 | 7.6% | 6.2% | **-0.59**（高利益率→低勝率） |
-| EPS成長率 | -22.3% | — | -0.15 |
-
-> 💡 候補銘柄は市場平均より財務品質が高いが、**その中で財務品質の高い候補ほど OOS 勝率が低い**。  
-> モメンタム戦略は「財務的に見落とされがちな銘柄」でより機能するというエビデンス。  
-> Track A の「財務フィルター=取引数減少・CAGR 低下」と整合。
-
-*Last Updated: 2026年5月3日　Version 4.4*
+*Last Updated: 2026年5月3日　Version 4.5*
