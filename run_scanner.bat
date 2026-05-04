@@ -28,10 +28,10 @@ if !errorlevel! neq 0 (
 
 rem --- business day check ---
 for /f "delims=" %%L in ('%VENV_PYTHON% %CHECK_BIZDAY% 2^>nul') do set BIZDAY_MSG=%%L
-set BIZDAY_EXIT=!errorlevel!
 echo [%date% %time:~0,8%] !BIZDAY_MSG! >> "%PROJECT_DIR%\logs\scheduler_log.txt"
 
-if !BIZDAY_EXIT! neq 0 (
+echo !BIZDAY_MSG! | findstr /i "SKIP" > nul 2>&1
+if !errorlevel! equ 0 (
     goto :end
 )
 
