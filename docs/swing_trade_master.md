@@ -1,5 +1,5 @@
 # 自動売買システム設計書
-**最終更新：2026年5月3日　Version 4.8**
+**最終更新：2026年5月4日　Version 4.9**
 
 ---
 
@@ -748,7 +748,8 @@ swing-trade-system/
 | 5b94375 | docs: 設計書 Version 4.7 - 整合性確認・Git履歴・フィルター記述を最終更新 |
 | a85ba0c | docs: 設計書 Version 4.7 最終整備・CLAUDE.md 現況追記 |
 | 1c9f57b | feat: 空売り比率OOS検証完了 - IS+0.055→OOS-0.021で不採用確定・設計書v4.8 |
-| (today) | fix: run_scanner.bat 祝日スキップをscheduler_log.txtに記録するよう修正 |
+| 0cb6dc9 | fix: run_scanner.bat 祝日スキップをscheduler_log.txtに記録するよう修正 |
+| 8568147 | fix: run_scanner.bat 祝日スキップバグ修正 - for/f errorlevel問題をSKIP文字列判定に変更 |
 
 ---
 
@@ -767,4 +768,4 @@ swing-trade-system/
 ---
 
 *本ドキュメントはフェーズ完了時・重要な変更時に更新する*
-*Last Updated: 2026年5月3日　Version 4.8*
+*Last Updated: 2026年5月4日　Version 4.9*
