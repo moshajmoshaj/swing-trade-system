@@ -1,5 +1,5 @@
 # 自動売買システム設計書
-**最終更新：2026年5月7日　Version 4.12**
+**最終更新：2026年5月7日　Version 4.13**
 
 ---
 
@@ -723,6 +723,22 @@ swing-trade-system/
   ④ `auto_report.py`：月次集計・戦略別損益を日次通知
 - ログ確認：`logs/scheduler_log.txt`
 
+### Phase 4-2：並行ペーパートレード（2026-05-07〜）
+
+Phase 4（v1・A/C/D/E）と並行して、最優秀構成（A v2 + G）でペーパートレードを実施する。
+
+| 項目 | Phase 4（現行） | Phase 4-2（新規並行） |
+|------|--------------|-------------------|
+| 候補銘柄 | v1・30銘柄 | **v2・29銘柄（A）+ 全プライム（G）** |
+| 戦略 | A/C/D/E | **A v2 + G のみ** |
+| 実行時刻 | 毎日17:00 | **毎日17:30** |
+| ログ | `logs/paper_trade_log.xlsx` | `logs/paper_trade_log_p4b.csv` |
+| スケジューラ | `swing-trade-scanner` | `swing-trade-p4b` |
+| 目標 | 年利8%以上 | **年利13.2%以上（退職金条件）** |
+| バッチ | `run_scanner.bat` | `run_p4b.bat` |
+
+**実装ファイル**：`src/scanner_p4b.py` / `src/auto_entry_p4b.py` / `src/auto_exit_p4b.py` / `src/auto_report_p4b.py`
+
 ### Phase 4 変更禁止ルール（凍結宣言）
 
 > 💡 Phase 4は「戦略を育てる期間」ではなく「戦略を**記録する**期間」。
@@ -827,7 +843,8 @@ swing-trade-system/
 | 3fe23cb | docs: 設計書 Version 4.9 - 祝日スキップバグ修正・Git履歴追加 |
 | a86d5f3 | feat: 合算バックテスト(A v2+E v2+F) - CAGR+5.53%・15%未達確認・設計書v4.10 |
 | d113770 | docs: 退職金投入条件変更 - 年利15%×3年→3年累積45%+各年-5%以上+各年DD-15%以内・設計書v4.11 |
-| (today) | feat: 新戦略G(EPS加速)開発・A+G合算OOS+16%達成・設計書v4.12 |
+| 72e700c | feat: 新戦略G(EPS加速)開発・A+G合算OOS+16%達成・設計書v4.12 |
+| (today) | feat: Phase 4-2実装(A v2+G・17:30自動実行)・設計書v4.13 |
 
 ---
 
@@ -846,4 +863,4 @@ swing-trade-system/
 ---
 
 *本ドキュメントはフェーズ完了時・重要な変更時に更新する*
-*Last Updated: 2026年5月7日　Version 4.12*
+*Last Updated: 2026年5月7日　Version 4.13*
