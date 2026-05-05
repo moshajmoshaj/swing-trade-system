@@ -88,28 +88,48 @@ def get_g_target_codes(scan_date: datetime.date) -> dict:
     return result
 
 
+COL_RENAME = {"O": "Open", "H": "High", "L": "Low", "C": "Close", "Vo": "Volume"}
+
+
+def fetch_prices_for_codes(client, codes: list, scan_date: datetime.date) -> pd.DataFrame:
+    """銘柄リストの株価データを取得（既存 scanner.py と同じ方式）"""
+    end_dt   = scan_date.strftime("%Y%m%d")
+    start_dt = (scan_date - timedelta(days=DAYS_TO_FETCH + 10)).strftime("%Y%m%d")
+    dfs = []
+    for i, code in enumerate(codes):
+        try:
+            df = call_with_retry(
+                client.get_eq_bars_daily,
+                code=code,
+                from_yyyymmdd=start_dt,
+                to_yyyymmdd=end_dt,
+            )
+            if df is not None and not df.empty:
+                df = df.rename(columns=COL_RENAME)
+                df["Code"] = code
+                dfs.append(df)
+        except Exception as e:
+            pass
+        if (i + 1) % 10 == 0:
+            import time; time.sleep(0.5)
+    if not dfs:
+        return pd.DataFrame()
+    prices = pd.concat(dfs, ignore_index=True)
+    prices["Date"] = pd.to_datetime(prices["Date"])
+    return prices.sort_values(["Code", "Date"]).reset_index(drop=True)
+
+
 def fetch_and_scan(client, codes: list, scan_date: datetime.date,
                    strategy: str, g_disc_dates: dict = None) -> list:
     """指定銘柄リストのシグナルをスキャン"""
     if not codes:
         return []
 
-    end_dt   = scan_date.strftime("%Y-%m-%d")
-    start_dt = (scan_date - timedelta(days=DAYS_TO_FETCH + 10)).strftime("%Y-%m-%d")
-
-    try:
-        prices = call_with_retry(
-            client.get_price_range,
-            start_date=start_dt, end_date=end_dt, codes=codes
-        )
-    except Exception as e:
-        log(f"ERROR: 価格取得失敗 ({e})")
-        return []
-
+    prices = fetch_prices_for_codes(client, codes, scan_date)
     if prices.empty:
+        log(f"WARN: {strategy} 価格データ取得ゼロ件")
         return []
 
-    prices["Date"] = pd.to_datetime(prices["Date"])
     signals = []
 
     for code in codes:
@@ -118,15 +138,15 @@ def fetch_and_scan(client, codes: list, scan_date: datetime.date,
             continue
 
         # 指標計算
-        df["SMA20"]    = df["AdjClose"].rolling(20).mean()
-        df["SMA50"]    = df["AdjClose"].rolling(50).mean()
-        df["SMA200"]   = df["AdjClose"].rolling(200).mean()
+        df["SMA20"]    = df["Close"].rolling(20).mean()
+        df["SMA50"]    = df["Close"].rolling(50).mean()
+        df["SMA200"]   = df["Close"].rolling(200).mean()
         df["VOL_MA20"] = df["Volume"].rolling(20).mean()
         try:
-            df["RSI14"] = ta.rsi(df["AdjClose"], length=14)
-            df["ATR14"] = ta.atr(df["High"], df["Low"], df["AdjClose"], length=14)
-            adx_df      = ta.adx(df["High"], df["Low"], df["AdjClose"], length=14)
-            df["ADX14"] = adx_df[f"ADX_14"] if adx_df is not None else 0
+            df["RSI14"] = ta.rsi(df["Close"], length=14)
+            df["ATR14"] = ta.atr(df["High"], df["Low"], df["Close"], length=14)
+            adx_df      = ta.adx(df["High"], df["Low"], df["Close"], length=14)
+            df["ADX14"] = adx_df["ADX_14"] if adx_df is not None and "ADX_14" in adx_df.columns else 0
         except Exception:
             continue
 
@@ -135,34 +155,34 @@ def fetch_and_scan(client, codes: list, scan_date: datetime.date,
             continue
         row = today_row.iloc[-1]
 
-        if pd.isna(row["RSI14"]) or pd.isna(row["ATR14"]) or pd.isna(row["SMA200"]):
+        if pd.isna(row.get("RSI14")) or pd.isna(row.get("ATR14")) or pd.isna(row.get("SMA200")):
             continue
 
-        close = row["AdjClose"]
-        vol   = row["Volume"]
+        close = float(row["Close"])
+        vol   = float(row["Volume"])
+        open_ = float(row["Open"])
 
         if strategy == "A":
-            # 戦略Aシグナル条件
-            rsi3 = df["RSI14"].shift(3).iloc[-1] if len(df) > 3 else None
+            rsi3_series = df["RSI14"].shift(3)
+            rsi3 = float(rsi3_series.iloc[-1]) if len(rsi3_series) > 0 else 0
             if (row["SMA20"] > row["SMA50"] and
                 close > row["SMA200"] and
                 RSI_MIN_A <= row["RSI14"] <= RSI_MAX_A and
-                (rsi3 is None or row["RSI14"] > rsi3) and
+                row["RSI14"] > rsi3 and
                 vol >= row["VOL_MA20"] * 1.2 and
-                close > row["Open"] and
+                close > open_ and
                 row["ADX14"] > ADX_MIN):
                 signals.append({
                     "Code": code[:4], "Strategy": "A",
-                    "Close": close, "RSI": round(row["RSI14"], 1),
-                    "ADX": round(row["ADX14"], 1),
-                    "ATR": round(row["ATR14"], 1),
-                    "SL": round(close - row["ATR14"] * 2, 0),
-                    "TP": round(close + row["ATR14"] * 6, 0),
+                    "Close": close, "RSI": round(float(row["RSI14"]), 1),
+                    "ADX": round(float(row["ADX14"]), 1),
+                    "ATR": round(float(row["ATR14"]), 1),
+                    "SL": round(close - float(row["ATR14"]) * 2, 0),
+                    "TP": round(close + float(row["ATR14"]) * 6, 0),
                     "MaxHold": 10
                 })
 
         elif strategy == "G":
-            # 戦略Gシグナル条件（EPS加速ウィンドウ内）
             disc = g_disc_dates.get(code)
             if disc is None:
                 continue
@@ -172,14 +192,14 @@ def fetch_and_scan(client, codes: list, scan_date: datetime.date,
             if (close > row["SMA200"] and
                 RSI_MIN_G <= row["RSI14"] <= RSI_MAX_G and
                 vol >= row["VOL_MA20"] * 1.2 and
-                close > row["Open"]):
+                close > open_):
                 signals.append({
                     "Code": code[:4], "Strategy": "G",
-                    "Close": close, "RSI": round(row["RSI14"], 1),
+                    "Close": close, "RSI": round(float(row["RSI14"]), 1),
                     "ADX": 0,
-                    "ATR": round(row["ATR14"], 1),
-                    "SL": round(close - row["ATR14"] * 2, 0),
-                    "TP": round(close + row["ATR14"] * 6, 0),
+                    "ATR": round(float(row["ATR14"]), 1),
+                    "SL": round(close - float(row["ATR14"]) * 2, 0),
+                    "TP": round(close + float(row["ATR14"]) * 6, 0),
                     "MaxHold": 15
                 })
 
@@ -212,10 +232,13 @@ def main():
         rows = [{"Date": today_str, **s} for s in all_sigs]
         df_log = pd.DataFrame(rows)
         log_path = Path(SCANNER_LOG)
-        if log_path.exists():
-            old = pd.read_csv(log_path)
-            old = old[old["Date"] != today_str]
-            df_log = pd.concat([old, df_log], ignore_index=True)
+        if log_path.exists() and log_path.stat().st_size > 0:
+            try:
+                old = pd.read_csv(log_path, dtype={"Code": str})
+                old = old[old["Date"] != today_str]
+                df_log = pd.concat([old, df_log], ignore_index=True)
+            except Exception:
+                pass
         df_log.to_csv(log_path, index=False, encoding="utf-8-sig")
 
         # 結果表示

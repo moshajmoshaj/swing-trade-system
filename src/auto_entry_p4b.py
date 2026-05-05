@@ -73,7 +73,11 @@ def main():
             return
 
         today_str = datetime.now().strftime("%Y-%m-%d")
-        scans = pd.read_csv(SCANNER_LOG, dtype={"Code": str})
+        try:
+            scans = pd.read_csv(SCANNER_LOG, dtype={"Code": str})
+        except Exception:
+            log("INFO: 本日のシグナル銘柄なし（スキャンログ空）")
+            return
         today_sigs = scans[scans["Date"] == today_str].sort_values("RSI", ascending=False)
 
         if today_sigs.empty:
